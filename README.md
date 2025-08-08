@@ -273,15 +273,23 @@ if [[ "${1:-}" ]]; then
     trap - ERR 
     case "${1}" in
         --dry-run)
+            # Disable the global "crash" trap for this specific mode
+            trap - ERR
             echo "--- DRY RUN MODE ACTIVATED ---"
-            rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 "$LOCAL_DIR" "$REMOTE_TARGET"
-            echo "--- DRY RUN COMPLETED ---"; exit 0 ;;
+            if ! rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 "$LOCAL_DIR" "$REMOTE_TARGET"; then
+                echo "" # Add a newline for spacing
+                echo "❌ Dry run FAILED. See the rsync error message above for details."
+                exit 1
+            fi
+            echo "--- DRY RUN COMPLETED ---"
+            exit 0
+            ;;
         --checksum)
             echo "--- INTEGRITY CHECK MODE ACTIVATED ---"
             echo "Comparing checksums... this may take a while."
             FILE_DISCREPANCIES=$(run_integrity_check)
             if [ -z "$FILE_DISCREPANCIES" ]; then
-                echo "✅ Checksum validation passed. No discrepancies found."
+                log_message "✅ Checksum validation passed. No discrepancies found."
                 send_notification "✅ Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "default" "success" "Checksum validation passed. No discrepancies found."
             else
                 ISSUE_LIST=$(echo "${FILE_DISCREPANCIES}" | head -n 10)
