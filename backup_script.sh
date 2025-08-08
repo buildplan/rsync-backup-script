@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # =================================================================
@@ -57,7 +56,7 @@ log_message() {
 send_ntfy() {
     local title="$1" tags="$2" priority="$3" message="$4"
     if [[ "${NTFY_ENABLED:-false}" != "true" ]] || [ -z "${NTFY_TOKEN:-}" ] || [ -z "${NTFY_URL:-}" ]; then return; fi
-    curl -s --max-time 15 -u ":$NTFY_TOKEN" -H "Title: $title" -H "Tags: $tags" -H "Priority: $priority" -d "$message" "$NTFY_URL" > /dev/null 2>> "$LOG_FILE"
+    curl -s -u ":$NTFY_TOKEN" -H "Title: $title" -H "Tags: $tags" -H "Priority: $priority" -d "$message" "$NTFY_URL" > /dev/null 2>> "$LOG_FILE"
 }
 
 send_discord() {
@@ -69,10 +68,14 @@ send_discord() {
         failure) color=15158332 ;; # Red
         *)       color=9807270 ;;   # Grey
     esac
-    local escaped_message; escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+
+    local escaped_message
+    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+
     local json_payload; printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
         "$title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-    curl -s --max-time 15 -H "Content-Type: application/json" -d "$json_payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>> "$LOG_FILE"
+        
+    curl -s -H "Content-Type: application/json" -d "$json_payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>> "$LOG_FILE"
 }
 
 send_notification() {
@@ -101,6 +104,7 @@ format_backup_stats() {
 }
 
 cleanup() {
+    # This function is called on EXIT, ensuring the temp file is always removed.
     rm -f "${RSYNC_LOG_TMP:-}"
 }
 
@@ -137,7 +141,7 @@ if [[ "${1:-}" == "--verbose" ]]; then
 fi
 
 if [[ "${1:-}" ]]; then
-    trap - ERR 
+    trap - ERR # Disable global crash trap for special modes, they handle their own errors
     case "${1}" in
         --dry-run)
             echo "--- DRY RUN MODE ACTIVATED ---"
@@ -180,9 +184,7 @@ fi
 echo "============================================================" >> "$LOG_FILE"
 log_message "Starting rsync backup..."
 
-START_TIME=$(date +%s)
-
-RSYNC_LOG_TMP=$(mktemp)
+RSYNC_LOG_TMP=$(mktemp) # Temp file is created here
 RSYNC_EXIT_CODE=0
 RSYNC_OPTS=("${RSYNC_BASE_OPTS[@]}")
 
@@ -195,9 +197,6 @@ else
     nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
 fi
 
-END_TIME=$(date +%s)
-DURATION=$((END_TIME - START_TIME))
-
 cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"
 RSYNC_OUTPUT=$(<"$RSYNC_LOG_TMP")
 
@@ -206,17 +205,16 @@ trap - ERR
 case $RSYNC_EXIT_CODE in
     0)
         BACKUP_STATS=$(format_backup_stats "$RSYNC_OUTPUT")
-        SUCCESS_MSG=$(printf "%s\n\nDuration: %dm %ds" "$BACKUP_STATS" $((DURATION / 60)) $((DURATION % 60)))
         log_message "SUCCESS: rsync completed."
-        send_notification "✅ Backup SUCCESS: ${HOSTNAME}" "white_check_mark" "default" "success" "$SUCCESS_MSG" ;;
+        send_notification "✅ Backup SUCCESS: ${HOSTNAME}" "white_check_mark" "default" "success" "$BACKUP_STATS" ;;
     24)
         BACKUP_STATS=$(format_backup_stats "$RSYNC_OUTPUT")
-        WARN_MSG=$(printf "rsync completed with a warning (code 24).\nSome source files vanished during transfer.\n\n%s\n\nDuration: %dm %ds" "$BACKUP_STATS" $((DURATION / 60)) $((DURATION % 60)))
         log_message "WARNING: rsync completed with code 24 (some source files vanished)."
+        WARN_MSG="rsync completed with a warning (code 24).\nSome source files vanished during transfer.\n\n${BACKUP_STATS}"
         send_notification "⚠️ Backup Warning: ${HOSTNAME}" "warning" "high" "warning" "$WARN_MSG" ;;
     *)
-        FAIL_MSG=$(printf "rsync failed on ${HOSTNAME} with exit code ${RSYNC_EXIT_CODE}. Check log for details.\n\nDuration: %dm %ds" $((DURATION / 60)) $((DURATION % 60)))
         log_message "FAILED: rsync exited with code: $RSYNC_EXIT_CODE."
+        FAIL_MSG="rsync failed on ${HOSTNAME} with exit code ${RSYNC_EXIT_CODE}. Check log for details."
         send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "$FAIL_MSG" ;;
 esac
 
