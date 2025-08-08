@@ -25,7 +25,7 @@ This is a robust script for automating backups of a local directory to a remote 
 -   **Check Integrity**: `sudo ./backup_script.sh --checksum` (Compares local and remote files using checksums; can be slow but is very thorough).
 -   **Get Mismatch Count**: `sudo ./backup_script.sh --summary` (Quickly reports the number of files that differ between local and remote).
 
-The log file is located at `/var/log/backup_rsync.log` by default.
+*The log file is located at `/var/log/backup_rsync.log` by default.*
 
 ---
 
@@ -75,7 +75,7 @@ The script needs to log into the Hetzner Storage Box without a password.
     ```sh
     sudo cat /root/.ssh/id_ed25519.pub
     ```
-    If you encounter permission issues use `sudo su` to access root directly.
+    *If you encounter permission issues use `sudo su` to access root directly.*
 
   - Go to your Hetzner Robot panel, select your Storage Box, and paste the entire public key content into the "SSH Keys" section.
   - Or use the `ssh-copy-id` command like this: (Replace `u444300` and the hostname with your own details.)
