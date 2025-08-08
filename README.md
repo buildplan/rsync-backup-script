@@ -121,6 +121,7 @@ To run the backup automatically, edit the root crontab.
     0 3 * * * /home/user/scripts/backup/backup_script.sh >/dev/null 2>&1
     ```
     *(Redirecting output to `/dev/null` is fine since the script handles its own logging and notifications).*
+    
     *(Note: `sudo` is not needed here because this command is placed in the root user's crontab via `sudo crontab -e`, so it already runs with root privileges.)*
 
 -----
