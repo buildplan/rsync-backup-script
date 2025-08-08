@@ -15,9 +15,7 @@ This is a robust script for automating backups of a local directory to a remote 
 -   **User-Friendly Modes**: Includes `--dry-run`, `--checksum`, `--summary`, and a `--verbose` flag for live progress on manual runs.
 -   **Robust Error Handling**: Uses `set -Euo pipefail`, a global `ERR` trap, and handles specific `rsync` exit codes (e.g., warnings vs. failures).
 -   **Locking & Log Rotation**: Prevents concurrent runs and manages log file size automatically.
--   **Prerequisite Checks**: Verifies that all required commands and SSH connectivity are working before running.
--   **Log Rotation**: Automatically rotates the log file when it exceeds a defined size.
- 
+-   **Prerequisite Checks**: Verifies that all required commands and SSH connectivity are working before running. 
 
 ## Usage
 
