@@ -19,11 +19,13 @@ This is a robust script for automating backups of a local directory to a remote 
 
 ## Usage
 
--   **Run Silently (for cron)**: `./backup_script.sh`
+-   **Run Silently**: `./backup_script.sh` (for cron)
 -   **Run with Live Progress**: `./backup_script.sh --verbose`
--   **Dry Run**: `./backup_script.sh --dry-run`
+-   **Dry Run**: `./backup_script.sh --dry-run` (see what would change without doing anything)
 -   **Check Integrity**: `./backup_script.sh --checksum` (Compares local and remote files using checksums; can be slow but is very thorough).
 -   **Get Mismatch Count**: `./backup_script.sh --summary` (Quickly reports the number of files that differ between local and remote).
+
+The log file is located at `/var/log/backup_rsync.log` by default.
 
 ---
 
@@ -113,17 +115,6 @@ To run the backup automatically, edit the root crontab.
     0 3 * * * /root/scripts/backup/backup_script.sh >/dev/null 2>&1
     ```
     *(Redirecting output to `/dev/null` is fine since the script handles its own logging and notifications).*
-
------
-
-## Usage
-
-  - **Run Manually**: `cd /root/scripts/backup && ./backup_script.sh`
-  - **Dry Run** (see what would change without doing anything): `./backup_script.sh --dry-run`
-  - **Check Integrity** (compare local and remote files): `./backup_script.sh --checksum`
-  - **Get Mismatch Count**: `./backup_script.sh --summary`
-
-The log file is located at `/var/log/backup_rsync.log` by default.
 
 -----
 
