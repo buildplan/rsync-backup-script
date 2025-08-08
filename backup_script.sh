@@ -155,7 +155,8 @@ if [[ "${1:-}" ]]; then
             echo "Comparing checksums... this may take a while."
             FILE_DISCREPANCIES=$(run_integrity_check)
             if [ -z "$FILE_DISCREPANCIES" ]; then
-                log_message "✅ Checksum validation passed. No discrepancies found."
+                echo "✅ Checksum validation passed. No discrepancies found."
+                log_message "Checksum validation passed. No discrepancies found."
                 send_notification "✅ Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "default" "success" "Checksum validation passed. No discrepancies found."
             else
                 ISSUE_LIST=$(echo "${FILE_DISCREPANCIES}" | head -n 10)
