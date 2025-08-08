@@ -19,11 +19,11 @@ This is a robust script for automating backups of a local directory to a remote 
 
 ## Usage
 
--   **Run Silently**: `./backup_script.sh` (for cron)
--   **Run with Live Progress**: `./backup_script.sh --verbose`
--   **Dry Run**: `./backup_script.sh --dry-run` (see what would change without doing anything)
--   **Check Integrity**: `./backup_script.sh --checksum` (Compares local and remote files using checksums; can be slow but is very thorough).
--   **Get Mismatch Count**: `./backup_script.sh --summary` (Quickly reports the number of files that differ between local and remote).
+-   **Run Silently**: `sudo ./backup_script.sh` (for cron)
+-   **Run with Live Progress**: `sudo ./backup_script.sh --verbose`
+-   **Dry Run**: `sudo ./backup_script.sh --dry-run` (see what would change without doing anything)
+-   **Check Integrity**: `sudo ./backup_script.sh --checksum` (Compares local and remote files using checksums; can be slow but is very thorough).
+-   **Get Mismatch Count**: `sudo ./backup_script.sh --summary` (Quickly reports the number of files that differ between local and remote).
 
 The log file is located at `/var/log/backup_rsync.log` by default.
 
@@ -31,11 +31,11 @@ The log file is located at `/var/log/backup_rsync.log` by default.
 
 ## File Structure
 
-All files should be placed in a single directory (e.g., `/root/scripts/backup`).
+All files should be placed in a single directory (e.g., `/home/user/scripts/backup`).
 
 ```
 
-/root/scripts/backup/
+/home/user/scripts/backup/
 ├── backup_script.sh         (The main script)
 ├── backup_rsync.conf        (Your main backup settings)
 ├── credentials.conf         (Your secret token and ntfy URL)
@@ -88,7 +88,7 @@ The script needs to log into the Hetzner Storage Box without a password.
 
 ### 3\. Place and Configure Files
 
-1.  Create your script directory: `mkdir -p /root/scripts/backup && cd /root/scripts/backup`
+1.  Create your script directory: `mkdir -p /home/user/scripts/backup && cd /home/user/scripts/backup`
 2.  Create the four files (`backup_script.sh`, `backup_rsync.conf`, `credentials.conf`, `rsync_exclude.txt`) in this directory using the content provided below.
 3.  **Make the script executable**:
     ```sh
@@ -112,7 +112,7 @@ To run the backup automatically, edit the root crontab.
   - Add a line to schedule the script. This example runs the backup every day at 3:00 AM.
     ```crontab
     # Run the rsync backup every day at 3:00 AM
-    0 3 * * * /root/scripts/backup/backup_script.sh >/dev/null 2>&1
+    0 3 * * * /home/user/scripts/backup/backup_script.sh >/dev/null 2>&1
     ```
     *(Redirecting output to `/dev/null` is fine since the script handles its own logging and notifications).*
 
