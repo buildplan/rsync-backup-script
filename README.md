@@ -96,7 +96,7 @@ The script needs to log into the Hetzner Storage Box without a password.
     ```
 4.  **Set secure permissions** for your credentials:
     ```sh
-    chmod 600 credentials.conf
+    chmod 600 credentials.conf backup_rsync.conf
     ```
 5.  Edit `backup_rsync.conf` and `credentials.conf` to match your server paths, Hetzner details, and ntfy topic.
 6.  Edit `rsync_exclude.txt` to list any files or directories you wish to skip.
