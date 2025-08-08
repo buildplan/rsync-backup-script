@@ -136,6 +136,12 @@ To run the backup automatically, edit the root crontab.
 set -Euo pipefail
 umask 077
 
+# Check if the script is being run as root
+if (( EUID != 0 )); then
+    echo "❌ This script must be run as root or with sudo." >&2
+    exit 1
+fi
+
 # --- Determine script's location to load local config files ---
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
