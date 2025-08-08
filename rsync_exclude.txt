@@ -1,0 +1,19 @@
+# List of files/directories to exclude from backup, one per line.
+# See 'man rsync' for pattern matching rules.
+
+# Common cache and temporary files
+.cache/
+/tmp/
+*.tmp
+*.bak
+*.swp
+
+# Specific application caches/dependencies
+/node_modules/
+/vendor/
+__pycache__/
+
+# System files that shouldn't be backed up
+/lost+found/
+.DS_Store
+Thumbs.db
