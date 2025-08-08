@@ -132,7 +132,6 @@ The log file is located at `/var/log/backup_rsync.log` by default.
 ### **`backup_script.sh`**
 
 ```bash
-
 #!/bin/bash
 
 # =================================================================
