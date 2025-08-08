@@ -68,8 +68,13 @@ send_discord() {
         failure) color=15158332 ;; # Red
         *)       color=9807270 ;;   # Grey
     esac
+
+    local escaped_message
+    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+
     local json_payload; printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
-        "$title" "$message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+        "$title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+        
     curl -s -H "Content-Type: application/json" -d "$json_payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>> "$LOG_FILE"
 }
 
@@ -110,7 +115,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "high" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE}"' ERR
 
-REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice)
+REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed)
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "FATAL: Required command '$cmd' not found. Please install it." >&2; trap - ERR; exit 10
@@ -194,9 +199,8 @@ fi
 
 cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"
 RSYNC_OUTPUT=$(<"$RSYNC_LOG_TMP")
-# The EXIT trap will automatically clean up the temp file, even if the script fails here
 
-trap - ERR # Disable the crash trap, we are handling exit codes manually now
+trap - ERR 
 
 case $RSYNC_EXIT_CODE in
     0)
