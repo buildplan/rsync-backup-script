@@ -92,16 +92,32 @@ run_integrity_check() {
 }
 
 format_backup_stats() {
-    local rsync_output="$1" stats_summary bytes_transferred files_created files_deleted
-    bytes_transferred=$(echo "$rsync_output" | grep 'Total_transferred_size:' | awk '{print $2}') || true
-    files_created=$(echo "$rsync_output" | grep 'Number_of_created_files:' | awk '{print $2}') || true
-    files_deleted=$(echo "$rsync_output" | grep 'Number_of_deleted_files:' | awk '{print $2}') || true
+    local rsync_output="$1"
+    local stats_summary=""
+    local bytes_transferred=""
+    local files_created=""
+    local files_deleted=""
+
+    # First, try to parse the new rsync format (e.g., "Number_of_created_files: 200")
+    bytes_transferred=$(echo "$rsync_output" | grep 'Total_transferred_size:' | awk '{print $2}')
+    files_created=$(echo "$rsync_output" | grep 'Number_of_created_files:' | awk '{print $2}')
+    files_deleted=$(echo "$rsync_output" | grep 'Number_of_deleted_files:' | awk '{print $2}')
+
+    # If the variables are empty, it means we have the older format. Fall back to parsing that.
+    if [[ -z "$bytes_transferred" && -z "$files_created" && -z "$files_deleted" ]]; then
+        bytes_transferred=$(echo "$rsync_output" | grep 'Total transferred file size:' | awk '{gsub(/,/, ""); print $5}')
+        files_created=$(echo "$rsync_output" | grep 'Number of created files:' | awk '{print $4}')
+        files_deleted=$(echo "$rsync_output" | grep 'Number of deleted files:' | awk '{print $4}')
+    fi
+
+    # Format the final output string
     if [[ "${bytes_transferred:-0}" -gt 0 ]]; then
         stats_summary=$(printf "Data Transferred: %s" "$(numfmt --to=iec-i --suffix=B --format="%.2f" "$bytes_transferred")")
     else
         stats_summary="Data Transferred: 0 B (No changes)"
     fi
     stats_summary+=$(printf "\nFiles Created: %s\nFiles Deleted: %s" "${files_created:-0}" "${files_deleted:-0}")
+    
     echo -e "$stats_summary"
 }
 
