@@ -106,8 +106,8 @@ format_backup_stats() {
     # If the variables are empty, it means we have the older format. Fall back to parsing that.
     if [[ -z "$bytes_transferred" && -z "$files_created" && -z "$files_deleted" ]]; then
         bytes_transferred=$(echo "$rsync_output" | grep 'Total transferred file size:' | awk '{gsub(/,/, ""); print $5}')
-        files_created=$(echo "$rsync_output" | grep 'Number of created files:' | awk '{print $4}')
-        files_deleted=$(echo "$rsync_output" | grep 'Number of deleted files:' | awk '{print $4}')
+        files_created=$(echo "$rsync_output" | grep 'Number of created files:' | awk '{print $5}')
+        files_deleted=$(echo "$rsync_output" | grep 'Number of deleted files:' | awk '{print $5}')
     fi
 
     # Format the final output string
