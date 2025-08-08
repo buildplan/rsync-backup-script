@@ -62,10 +62,10 @@ sudo apt-get update && sudo apt-get install rsync curl coreutils util-linux
 
 The script needs to log into the Hetzner Storage Box without a password.
 
-  - **Generate an SSH key** on your server if you don't have one:
+  - **Generate a root user SSH key** on your server if you don't have one: (using root will avoid the permissions issues)
 
     ```sh
-    ssh-keygen -t rsa -b 4096
+    sudo ssh-keygen -t ed25519
     ```
 
     (Just press Enter through all the prompts).
@@ -73,15 +73,21 @@ The script needs to log into the Hetzner Storage Box without a password.
   - **Copy your public key** to the Hetzner Storage Box. First, view your public key:
 
     ```sh
-    cat ~/.ssh/id_rsa.pub
+    sudo cat /root/.ssh/id_ed25519.pub
     ```
+    If you encounter permission issues use `sudo su` to access root directly.
 
   - Go to your Hetzner Robot panel, select your Storage Box, and paste the entire public key content into the "SSH Keys" section.
+  - Or use the `ssh-copy-id` command like this: (Replace `u444300` and the hostname with your own details.)
+    ```sh
+    sudo ssh-copy-id -p 23 -s u444300-sub4@u444300.your-storagebox.de
+    ```
+    Hetzner Storage Box requires -s flag.
 
-  - **Test the connection**. Replace `u444300` and the hostname with your own details.
+  - **Test the connection**.
 
     ```sh
-    ssh -p 23 u444300-sub4@u444300.your-storagebox.de 'echo "Connection successful"'
+    sudo ssh -p 23 -s u444300-sub4@u444300.your-storagebox.de 'echo "Connection successful"'
     ```
 
     If this works without asking for a password, you are ready.
@@ -107,7 +113,7 @@ To run the backup automatically, edit the root crontab.
 
   - Open the crontab editor:
     ```sh
-    crontab -e
+    sudo crontab -e
     ```
   - Add a line to schedule the script. This example runs the backup every day at 3:00 AM.
     ```crontab
@@ -115,6 +121,7 @@ To run the backup automatically, edit the root crontab.
     0 3 * * * /home/user/scripts/backup/backup_script.sh >/dev/null 2>&1
     ```
     *(Redirecting output to `/dev/null` is fine since the script handles its own logging and notifications).*
+    *(Note: `sudo` is not needed here because this command is placed in the root user's crontab via `sudo crontab -e`, so it already runs with root privileges.)*
 
 -----
 
