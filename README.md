@@ -24,8 +24,8 @@ This is a robust script for automating backups of a local directory to a remote 
 -   **Run Silently (for cron)**: `./backup_script.sh`
 -   **Run with Live Progress**: `./backup_script.sh --verbose`
 -   **Dry Run**: `./backup_script.sh --dry-run`
--   **Check Integrity**: `./backup_script.sh --checksum`
--   **Get Mismatch Count**: `./backup_script.sh --summary`
+-   **Check Integrity**: `./backup_script.sh --checksum` (Compares local and remote files using checksums; can be slow but is very thorough).
+-   **Get Mismatch Count**: `./backup_script.sh --summary` (Quickly reports the number of files that differ between local and remote).
 
 ---
 
@@ -168,7 +168,7 @@ fi
 # =================================================================
 REMOTE_TARGET="${HETZNER_BOX}:${BOX_DIR}"
 LOCK_FILE="/tmp/backup_rsync.lock"
-MAX_LOG_SIZE=10485760 # 10 MB
+MAX_LOG_SIZE=10485760 # 10 MB in bytes
 
 RSYNC_BASE_OPTS=(
     -a -z --delete --partial --timeout=60
@@ -197,17 +197,14 @@ send_ntfy() {
 send_discord() {
     local title="$1" status="$2" message="$3"
     if [[ "${DISCORD_ENABLED:-false}" != "true" ]] || [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then return; fi
-
     local color; case "$status" in
         success) color=3066993 ;;  # Green
         warning) color=16776960 ;; # Yellow
         failure) color=15158332 ;; # Red
         *)       color=9807270 ;;   # Grey
     esac
-
     local json_payload; printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
         "$title" "$message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-        
     curl -s -H "Content-Type: application/json" -d "$json_payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>> "$LOG_FILE"
 }
 
@@ -218,7 +215,7 @@ send_notification() {
 }
 
 run_integrity_check() {
-    local rsync_check_opts=(-ainc --delete --exclude-from="$EXCLUDE_FROM" --out-format="%n" -e "$(printf "%s " "${SSH_OPTS[@]}")")
+    local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FROM" --out-format="%n" -e "$(printf "%s " "${SSH_OPTS[@]}")")
     LC_ALL=C rsync "${rsync_check_opts[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>> "$LOG_FILE"
 }
 
@@ -227,7 +224,6 @@ format_backup_stats() {
     bytes_transferred=$(echo "$rsync_output" | grep 'Total_transferred_size:' | awk '{print $2}') || true
     files_created=$(echo "$rsync_output" | grep 'Number_of_created_files:' | awk '{print $2}') || true
     files_deleted=$(echo "$rsync_output" | grep 'Number_of_deleted_files:' | awk '{print $2}') || true
-
     if [[ "${bytes_transferred:-0}" -gt 0 ]]; then
         stats_summary=$(printf "Data Transferred: %s" "$(numfmt --to=iec-i --suffix=B --format="%.2f" "$bytes_transferred")")
     else
@@ -237,10 +233,16 @@ format_backup_stats() {
     echo -e "$stats_summary"
 }
 
+cleanup() {
+    # This function is called on EXIT, ensuring the temp file is always removed.
+    rm -f "${RSYNC_LOG_TMP:-}"
+}
+
 # =================================================================
 #               PRE-FLIGHT CHECKS & SETUP
 # =================================================================
 
+trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "high" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE}"' ERR
 
 REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice)
@@ -255,7 +257,8 @@ if ! "${SSH_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit
     trap - ERR; exit 6
 fi
 
-# ... (other pre-flight checks for EXCLUDE_FROM, LOCAL_DIR slash) ...
+if ! [ -f "$EXCLUDE_FROM" ]; then send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "FATAL: Exclude file not found at $EXCLUDE_FROM"; trap - ERR; exit 3; fi
+if [[ "$LOCAL_DIR" != */ ]]; then send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "FATAL: LOCAL_DIR must end with a trailing slash ('/')"; trap - ERR; exit 2; fi
 
 # =================================================================
 #                       SCRIPT EXECUTION
@@ -268,25 +271,50 @@ if [[ "${1:-}" == "--verbose" ]]; then
 fi
 
 if [[ "${1:-}" ]]; then
-    trap - ERR
+    trap - ERR # Disable global crash trap for special modes, they handle their own errors
     case "${1}" in
         --dry-run)
             echo "--- DRY RUN MODE ACTIVATED ---"
             rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 "$LOCAL_DIR" "$REMOTE_TARGET"
             echo "--- DRY RUN COMPLETED ---"; exit 0 ;;
-        # ... (--checksum and --summary logic remains the same) ...
+        --checksum)
+            echo "--- INTEGRITY CHECK MODE ACTIVATED ---"
+            echo "Comparing checksums... this may take a while."
+            FILE_DISCREPANCIES=$(run_integrity_check)
+            if [ -z "$FILE_DISCREPANCIES" ]; then
+                echo "✅ Checksum validation passed. No discrepancies found."
+                send_notification "✅ Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "default" "success" "Checksum validation passed. No discrepancies found."
+            else
+                ISSUE_LIST=$(echo "${FILE_DISCREPANCIES}" | head -n 10)
+                printf "❌ Backup integrity check FAILED. First 10 differing files:\n%s\n" "${ISSUE_LIST}"
+                printf -v FAILURE_MSG "Backup integrity check FAILED.\n\nFirst 10 differing files:\n%s\n\nCheck log for full details." "${ISSUE_LIST}"
+                send_notification "❌ Backup Integrity FAILED: ${HOSTNAME}" "x" "high" "failure" "${FAILURE_MSG}"
+            fi
+            exit 0 ;;
+
+        --summary)
+            echo "--- INTEGRITY SUMMARY MODE ---"
+            echo "Calculating differences..."
+            MISMATCH_COUNT=$(run_integrity_check | wc -l)
+            printf "🚨 Total files with checksum mismatches: %d\n" "$MISMATCH_COUNT"
+            log_message "Summary mode check found $MISMATCH_COUNT mismatched files."
+            send_notification "📊 Backup Summary: ${HOSTNAME}" "bar_chart" "default" "success" "Mismatched files found: $MISMATCH_COUNT"
+            exit 0 ;;
     esac
 fi
 
 exec 200>"$LOCK_FILE"
 flock -n 200 || { echo "Another instance is running, exiting."; exit 5; }
 
-# ... (log rotation logic remains the same) ...
+if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$MAX_LOG_SIZE" ]; then
+    mv "$LOG_FILE" "${LOG_FILE}.$(date +%Y%m%d_%H%M%S)"
+    touch "$LOG_FILE"
+fi
 
 echo "============================================================" >> "$LOG_FILE"
 log_message "Starting rsync backup..."
 
-RSYNC_LOG_TMP=$(mktemp)
+RSYNC_LOG_TMP=$(mktemp) # Temp file is created here
 RSYNC_EXIT_CODE=0
 RSYNC_OPTS=("${RSYNC_BASE_OPTS[@]}")
 
@@ -301,9 +329,9 @@ fi
 
 cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"
 RSYNC_OUTPUT=$(<"$RSYNC_LOG_TMP")
-rm "$RSYNC_LOG_TMP"
+# The EXIT trap will automatically clean up the temp file, even if the script fails here
 
-trap - ERR
+trap - ERR # Disable the crash trap, we are handling exit codes manually now
 
 case $RSYNC_EXIT_CODE in
     0)
@@ -323,8 +351,6 @@ esac
 
 echo "======================= Run Finished =======================" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
-
-# The flock lock is released automatically when the script exits
 ````
 
 -----
