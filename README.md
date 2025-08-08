@@ -19,6 +19,14 @@ This is a robust script for automating backups of a local directory to a remote 
 
 ## Usage
 
+-   **Download script and configuration file**: also make script executable and set permissions for conf files)
+  
+    ```
+    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup_script.sh && chmod +x backup_script.sh
+    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/credentials.conf && chmod 600 credentials.conf
+    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup_rsync.conf && chmod 600 backup_rsync.conf
+    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/rsync_exclude.txt
+    ```
 -   **Run Silently**: `sudo ./backup_script.sh` (for cron)
 -   **Run with Live Progress**: `sudo ./backup_script.sh --verbose`
 -   **Dry Run**: `sudo ./backup_script.sh --dry-run` (see what would change without doing anything)
