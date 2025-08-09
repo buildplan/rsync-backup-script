@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =================================================================
-#               SCRIPT INITIALIZATION & SETUP
+#                 SCRIPT INITIALIZATION & SETUP
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -12,26 +12,53 @@ if (( EUID != 0 )); then
     exit 1
 fi
 
-# --- Determine script's location to load local config files ---
+# --- Determine script's location to load the config file ---
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+CONFIG_FILE="${SCRIPT_DIR}/backup.conf"
 
-# --- Source Configuration Files ---
-if [ -f "${SCRIPT_DIR}/backup_rsync.conf" ]; then
-    source "${SCRIPT_DIR}/backup_rsync.conf"
-else
-    echo "FATAL: Main configuration file backup_rsync.conf not found." >&2; exit 1
-fi
+# --- Create a temporary file for rsync exclusions ---
+# This file will be populated from the config and cleaned up automatically on exit.
+EXCLUDE_FILE_TMP=$(mktemp)
 
-# Securely load credentials by parsing the file to prevent code injection
-if [ -f "${SCRIPT_DIR}/credentials.conf" ]; then
-    while IFS='=' read -r key value; do
-        [[ "$key" =~ ^\s*#|^\s*$ ]] && continue
-        value="${value%\"}"; value="${value#\"}"
-        key=$(echo "$key" | tr -d '[:space:]')
-        declare "$key=$value"
-    done < "${SCRIPT_DIR}/credentials.conf"
+# --- Securely parse the unified configuration file ---
+if [ -f "$CONFIG_FILE" ]; then
+    # Initialize an empty array for SSH options for robustness
+    SSH_OPTS_ARR=()
+    in_exclude_block=false
+    while IFS= read -r line; do
+        # Handle the rsync exclusion block
+        if [[ "$line" == "BEGIN_EXCLUDES" ]]; then
+            in_exclude_block=true
+            continue
+        elif [[ "$line" == "END_EXCLUDES" ]]; then
+            in_exclude_block=false
+            continue
+        fi
+
+        if $in_exclude_block; then
+            # Append non-empty, non-comment lines to the temp exclude file
+            [[ ! "$line" =~ ^\s*#|^\s*$ ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
+            continue
+        fi
+
+        # Handle key-value pairs
+        if [[ "$line" =~ ^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.*) ]]; then
+            key="${BASH_REMATCH[1]}"
+            value="${BASH_REMATCH[2]}"
+            # Remove surrounding quotes from value
+            value="${value%\"}"; value="${value#\"}"
+            
+            # CRITICAL: Assign value as a literal string to prevent code injection
+            declare "$key"="$value"
+
+            # Robustly handle SSH options by converting the string to an array
+            if [[ "$key" == "SSH_OPTS_STR" ]]; then
+                read -r -a SSH_OPTS_ARR <<< "$value"
+            fi
+        fi
+    done < "$CONFIG_FILE"
 else
-    echo "FATAL: Credentials file credentials.conf not found." >&2; exit 1
+    echo "FATAL: Unified configuration file backup.conf not found." >&2; exit 1
 fi
 
 # =================================================================
@@ -43,8 +70,8 @@ MAX_LOG_SIZE=10485760 # 10 MB in bytes
 
 RSYNC_BASE_OPTS=(
     -a -z --delete --partial --timeout=60
-    --exclude-from="$EXCLUDE_FROM"
-    -e "$(printf "%s " "${SSH_OPTS[@]}")"
+    --exclude-from="$EXCLUDE_FILE_TMP"
+    -e "ssh ${SSH_OPTS_ARR[@]}"
 )
 
 # =================================================================
@@ -53,7 +80,7 @@ RSYNC_BASE_OPTS=(
 
 log_message() {
     local message="$1"
-    echo "[$HOSTNAME] [$(date '+%Y-%m-%d %H:%M:%S')] $message" >> "$LOG_FILE"
+    echo "[$HOSTNAME] [$(date '+%Y-%m-%d %H:%M:%S')] $message" >> "${LOG_FILE:-/dev/null}"
     if [[ "${VERBOSE_MODE:-false}" == "true" ]]; then
         echo "$message"
     fi
@@ -62,7 +89,7 @@ log_message() {
 send_ntfy() {
     local title="$1" tags="$2" priority="$3" message="$4"
     if [[ "${NTFY_ENABLED:-false}" != "true" ]] || [ -z "${NTFY_TOKEN:-}" ] || [ -z "${NTFY_URL:-}" ]; then return; fi
-    curl -s --max-time 15 -u ":$NTFY_TOKEN" -H "Title: $title" -H "Tags: $tags" -H "Priority: $priority" -d "$message" "$NTFY_URL" > /dev/null 2>> "$LOG_FILE"
+    curl -s --max-time 15 -u ":$NTFY_TOKEN" -H "Title: $title" -H "Tags: $tags" -H "Priority: $priority" -d "$message" "$NTFY_URL" > /dev/null 2>> "${LOG_FILE:-/dev/null}"
 }
 
 send_discord() {
@@ -77,7 +104,7 @@ send_discord() {
     local escaped_message; escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload; printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
         "$title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-    curl -s --max-time 15 -H "Content-Type: application/json" -d "$json_payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>> "$LOG_FILE"
+    curl -s --max-time 15 -H "Content-Type: application/json" -d "$json_payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>> "${LOG_FILE:-/dev/null}"
 }
 
 send_notification() {
@@ -87,8 +114,8 @@ send_notification() {
 }
 
 run_integrity_check() {
-    local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FROM" --out-format="%n" -e "$(printf "%s " "${SSH_OPTS[@]}")")
-    LC_ALL=C rsync "${rsync_check_opts[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>> "$LOG_FILE"
+    local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_ARR[@]}")
+    LC_ALL=C rsync "${rsync_check_opts[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>> "${LOG_FILE:-/dev/null}"
 }
 
 format_backup_stats() {
@@ -98,19 +125,18 @@ format_backup_stats() {
     local files_created=""
     local files_deleted=""
 
-    # First, try to parse the new rsync format (e.g., "Number_of_created_files: 200")
+    # First, try parsing the machine-readable format from --info=stats2
     bytes_transferred=$(echo "$rsync_output" | grep 'Total_transferred_size:' | awk '{print $2}')
     files_created=$(echo "$rsync_output" | grep 'Number_of_created_files:' | awk '{print $2}')
     files_deleted=$(echo "$rsync_output" | grep 'Number_of_deleted_files:' | awk '{print $2}')
 
-    # If the variables are empty, it means we have the older format. Fall back to parsing that.
+    # If parsing failed, fall back to the human-readable --stats format
     if [[ -z "$bytes_transferred" && -z "$files_created" && -z "$files_deleted" ]]; then
         bytes_transferred=$(echo "$rsync_output" | grep 'Total transferred file size:' | awk '{gsub(/,/, ""); print $5}')
         files_created=$(echo "$rsync_output" | grep 'Number of created files:' | awk '{print $5}')
         files_deleted=$(echo "$rsync_output" | grep 'Number of deleted files:' | awk '{print $5}')
     fi
 
-    # Format the final output string
     if [[ "${bytes_transferred:-0}" -gt 0 ]]; then
         stats_summary=$(printf "Data Transferred: %s" "$(numfmt --to=iec-i --suffix=B --format="%.2f" "$bytes_transferred")")
     else
@@ -118,11 +144,11 @@ format_backup_stats() {
     fi
     stats_summary+=$(printf "\nFiles Created: %s\nFiles Deleted: %s" "${files_created:-0}" "${files_deleted:-0}")
     
-    echo -e "$stats_summary"
+    printf "%s\n" "$stats_summary"
 }
 
 cleanup() {
-    rm -f "${RSYNC_LOG_TMP:-}"
+    rm -f "${EXCLUDE_FILE_TMP:-}" "${RSYNC_LOG_TMP:-}"
 }
 
 # =================================================================
@@ -130,22 +156,25 @@ cleanup() {
 # =================================================================
 
 trap cleanup EXIT
-trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "high" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE}"' ERR
+trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "high" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
-REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed)
+REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp)
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "FATAL: Required command '$cmd' not found. Please install it." >&2; trap - ERR; exit 10
     fi
 done
 
-if ! "${SSH_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
+if ! ssh "${SSH_OPTS_ARR[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
     send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "high" "failure" "Unable to SSH into $HETZNER_BOX. Check keys and connectivity."
     trap - ERR; exit 6
 fi
 
-if ! [ -f "$EXCLUDE_FROM" ]; then send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "FATAL: Exclude file not found at $EXCLUDE_FROM"; trap - ERR; exit 3; fi
-if [[ "$LOCAL_DIR" != */ ]]; then send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "FATAL: LOCAL_DIR must end with a trailing slash ('/')"; trap - ERR; exit 2; fi
+if [[ ! -d "$LOCAL_DIR" ]] || [[ "$LOCAL_DIR" != */ ]]; then 
+    send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "FATAL: LOCAL_DIR must exist and end with a trailing slash ('/')."
+    trap - ERR; exit 2
+fi
+
 
 # =================================================================
 #                       SCRIPT EXECUTION
@@ -161,17 +190,14 @@ if [[ "${1:-}" ]]; then
     trap - ERR 
     case "${1}" in
         --dry-run)
-            # Disable the global "crash" trap for this specific mode
             trap - ERR
             echo "--- DRY RUN MODE ACTIVATED ---"
             if ! rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 "$LOCAL_DIR" "$REMOTE_TARGET"; then
-                echo "" # Add a newline for spacing
+                echo ""
                 echo "❌ Dry run FAILED. See the rsync error message above for details."
                 exit 1
             fi
-            echo "--- DRY RUN COMPLETED ---"
-            exit 0
-            ;;
+            echo "--- DRY RUN COMPLETED ---"; exit 0 ;;
         --checksum)
             echo "--- INTEGRITY CHECK MODE ACTIVATED ---"
             echo "Comparing checksums... this may take a while."
