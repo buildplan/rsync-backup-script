@@ -265,6 +265,13 @@ else
     echo "FATAL: Unified configuration file backup.conf not found." >&2; exit 1
 fi
 
+for var in LOCAL_DIR BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE; do
+    if [ -z "${!var:-}" ]; then
+        echo "FATAL: Required config variable '$var' is missing or empty in $CONFIG_FILE." >&2
+        exit 1
+    fi
+done
+
 # =================================================================
 #               SCRIPT CONFIGURATION (STATIC)
 # =================================================================
@@ -329,14 +336,15 @@ format_backup_stats() {
     local files_created=""
     local files_deleted=""
 
-    bytes_transferred=$(echo "$rsync_output" | grep 'Total_transferred_size:' | awk '{print $2}')
-    files_created=$(echo "$rsync_output" | grep 'Number_of_created_files:' | awk '{print $2}')
-    files_deleted=$(echo "$rsync_output" | grep 'Number_of_deleted_files:' | awk '{print $2}')
+    bytes_transferred=$(echo "$rsync_output" | grep 'Total_transferred_size:' || true | awk '{print $2}')
+    files_created=$(echo "$rsync_output" | grep 'Number_of_created_files:' || true | awk '{print $2}')
+    files_deleted=$(echo "$rsync_output" | grep 'Number_of_deleted_files:' || true | awk '{print $2}')
 
+    # Fallback for older rsync versions
     if [[ -z "$bytes_transferred" && -z "$files_created" && -z "$files_deleted" ]]; then
-        bytes_transferred=$(echo "$rsync_output" | grep 'Total transferred file size:' | awk '{gsub(/,/, ""); print $5}')
-        files_created=$(echo "$rsync_output" | grep 'Number of created files:' | awk '{print $5}')
-        files_deleted=$(echo "$rsync_output" | grep 'Number of deleted files:' | awk '{print $5}')
+        bytes_transferred=$(echo "$rsync_output" | grep 'Total transferred file size:' || true | awk '{gsub(/,/, ""); print $5}')
+        files_created=$(echo "$rsync_output" | grep 'Number of created files:' || true | awk '{print $5}')
+        files_deleted=$(echo "$rsync_output" | grep 'Number of deleted files:' || true | awk '{print $5}')
     fi
 
     if [[ "${bytes_transferred:-0}" -gt 0 ]]; then
@@ -409,6 +417,7 @@ if [[ "${1:-}" ]]; then
                 log_message "Checksum validation passed. No discrepancies found."
                 send_notification "✅ Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "default" "success" "Checksum validation passed. No discrepancies found."
             else
+                log_message "Backup integrity check FAILED. Found discrepancies."
                 ISSUE_LIST=$(echo "${FILE_DISCREPANCIES}" | head -n 10)
                 printf "❌ Backup integrity check FAILED. First 10 differing files:\n%s\n" "${ISSUE_LIST}"
                 printf -v FAILURE_MSG "Backup integrity check FAILED.\n\nFirst 10 differing files:\n%s\n\nCheck log for full details." "${ISSUE_LIST}"
