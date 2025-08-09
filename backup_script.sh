@@ -49,7 +49,6 @@ fi
 for var in LOCAL_DIR BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE \
            NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE \
            LOG_RETENTION_DAYS; do
-           NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE; do
     if [ -z "${!var:-}" ]; then
         echo "FATAL: Required config variable '$var' is missing or empty in $CONFIG_FILE." >&2
         exit 1
@@ -125,7 +124,7 @@ parse_stat() {
 
 format_backup_stats() {
     local rsync_output="$1"
-
+    
     local bytes_transferred=$(parse_stat "$rsync_output" 'Total_transferred_size:' '{print $2}')
     local files_created=$(parse_stat "$rsync_output" 'Number_of_created_files:' '{print $2}')
     local files_deleted=$(parse_stat "$rsync_output" 'Number_of_deleted_files:' '{print $2}')
@@ -143,7 +142,7 @@ format_backup_stats() {
         stats_summary="Data Transferred: 0 B (No changes)"
     fi
     stats_summary+=$(printf "\nFiles Created: %s\nFiles Deleted: %s" "${files_created:-0}" "${files_deleted:-0}")
-
+    
     printf "%s\n" "$stats_summary"
 }
 
@@ -170,7 +169,7 @@ if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 
     trap - ERR; exit 6
 fi
 
-if [[ ! -d "$LOCAL_DIR" ]] || [[ "$LOCAL_DIR" != */ ]]; then
+if [[ ! -d "$LOCAL_DIR" ]] || [[ "$LOCAL_DIR" != */ ]]; then 
     send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: LOCAL_DIR must exist and end with a trailing slash ('/')."
     trap - ERR; exit 2
 fi
@@ -187,7 +186,7 @@ if [[ "${1:-}" == "--verbose" ]]; then
 fi
 
 if [[ "${1:-}" ]]; then
-    trap - ERR
+    trap - ERR 
     case "${1}" in
         --dry-run)
             trap - ERR
@@ -260,7 +259,7 @@ DURATION=$((END_TIME - START_TIME))
 cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"
 RSYNC_OUTPUT=$(<"$RSYNC_LOG_TMP")
 
-trap - ERR
+trap - ERR 
 
 case $RSYNC_EXIT_CODE in
     0)
