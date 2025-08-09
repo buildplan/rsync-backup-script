@@ -155,8 +155,9 @@ To run the backup automatically, edit the root crontab.
 # !! IMPORTANT !! Set file permissions to 600 (chmod 600 backup.conf)
 
 # --- Source and Destination ---
-# IMPORTANT: LOCAL_DIR must end with a trailing slash!
-LOCAL_DIR="/home/user/"
+# List all source directories to back up, separated by spaces.
+# IMPORTANT: Each path MUST end with a trailing slash!
+BACKUP_DIRS="/home/user/ /usr/scripts/ /etc/apps/"
 BOX_DIR="/home/myvps/"
 
 # --- Connection Details ---
@@ -221,7 +222,7 @@ END_EXCLUDES
 
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
-#                       v0.8 - 2025.08.09
+#                       v0.9 - 2025.08.09
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -266,7 +267,7 @@ else
 fi
 
 # --- Validate that all required configuration variables are set ---
-for var in LOCAL_DIR BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE \
+for var in BACKUP_DIRS BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE \
            NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE \
            LOG_RETENTION_DAYS; do
     if [ -z "${!var:-}" ]; then
@@ -329,7 +330,8 @@ send_notification() {
 
 run_integrity_check() {
     local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
-    LC_ALL=C rsync "${rsync_check_opts[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>> "${LOG_FILE:-/dev/null}"
+    # shellcheck disable=SC2086
+    LC_ALL=C rsync "${rsync_check_opts[@]}" $BACKUP_DIRS "$REMOTE_TARGET" 2>> "${LOG_FILE:-/dev/null}"
 }
 
 parse_stat() {
@@ -389,10 +391,12 @@ if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 
     trap - ERR; exit 6
 fi
 
-if [[ ! -d "$LOCAL_DIR" ]] || [[ "$LOCAL_DIR" != */ ]]; then
-    send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: LOCAL_DIR must exist and end with a trailing slash ('/')."
-    trap - ERR; exit 2
-fi
+for dir in $BACKUP_DIRS; do
+    if [[ ! -d "$dir" ]] || [[ "$dir" != */ ]]; then 
+        send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: A directory in BACKUP_DIRS ('$dir') must exist and end with a trailing slash ('/')."
+        trap - ERR; exit 2
+    fi
+done
 
 
 # =================================================================
@@ -411,36 +415,37 @@ if [[ "${1:-}" ]]; then
         --dry-run)
             trap - ERR
             echo "--- DRY RUN MODE ACTIVATED ---"
-            if ! rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 "$LOCAL_DIR" "$REMOTE_TARGET"; then
+            # shellcheck disable=SC2086
+            if ! rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 $BACKUP_DIRS "$REMOTE_TARGET"; then
                 echo ""
                 echo "❌ Dry run FAILED. See the rsync error message above for details."
                 exit 1
             fi
             echo "--- DRY RUN COMPLETED ---"; exit 0 ;;
-        --checksum)
+        --checksum | --summary)
+            # Both modes use the same check, just with different reporting
             echo "--- INTEGRITY CHECK MODE ACTIVATED ---"
-            echo "Comparing checksums... this may take a while."
-            FILE_DISCREPANCIES=$(run_integrity_check)
-            if [ -z "$FILE_DISCREPANCIES" ]; then
-                echo "✅ Checksum validation passed. No discrepancies found."
-                log_message "Checksum validation passed. No discrepancies found."
-                send_notification "✅ Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Checksum validation passed. No discrepancies found."
-            else
-                log_message "Backup integrity check FAILED. Found discrepancies."
-                ISSUE_LIST=$(echo "${FILE_DISCREPANCIES}" | head -n 10)
-                printf "❌ Backup integrity check FAILED. First 10 differing files:\n%s\n" "${ISSUE_LIST}"
-                printf -v FAILURE_MSG "Backup integrity check FAILED.\n\nFirst 10 differing files:\n%s\n\nCheck log for full details." "${ISSUE_LIST}"
-                send_notification "❌ Backup Integrity FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "${FAILURE_MSG}"
-            fi
-            exit 0 ;;
-
-        --summary)
-            echo "--- INTEGRITY SUMMARY MODE ---"
             echo "Calculating differences..."
-            MISMATCH_COUNT=$(run_integrity_check | wc -l)
-            printf "🚨 Total files with checksum mismatches: %d\n" "$MISMATCH_COUNT"
-            log_message "Summary mode check found $MISMATCH_COUNT mismatched files."
-            send_notification "📊 Backup Summary: ${HOSTNAME}" "bar_chart" "${NTFY_PRIORITY_SUCCESS}" "success" "Mismatched files found: $MISMATCH_COUNT"
+            FILE_DISCREPANCIES=$(run_integrity_check)
+            
+            if [[ "$1" == "--summary" ]]; then
+                MISMATCH_COUNT=$(echo "$FILE_DISCREPANCIES" | wc -l)
+                printf "🚨 Total files with checksum mismatches: %d\n" "$MISMATCH_COUNT"
+                log_message "Summary mode check found $MISMATCH_COUNT mismatched files."
+                send_notification "📊 Backup Summary: ${HOSTNAME}" "bar_chart" "${NTFY_PRIORITY_SUCCESS}" "success" "Mismatched files found: $MISMATCH_COUNT"
+            else # --checksum
+                if [ -z "$FILE_DISCREPANCIES" ]; then
+                    echo "✅ Checksum validation passed. No discrepancies found."
+                    log_message "Checksum validation passed. No discrepancies found."
+                    send_notification "✅ Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Checksum validation passed. No discrepancies found."
+                else
+                    log_message "Backup integrity check FAILED. Found discrepancies."
+                    ISSUE_LIST=$(echo "${FILE_DISCREPANCIES}" | head -n 10)
+                    printf "❌ Backup integrity check FAILED. First 10 differing files:\n%s\n" "${ISSUE_LIST}"
+                    printf -v FAILURE_MSG "Backup integrity check FAILED.\n\nFirst 10 differing files:\n%s\n\nCheck log for full details." "${ISSUE_LIST}"
+                    send_notification "❌ Backup Integrity FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "${FAILURE_MSG}"
+                fi
+            fi
             exit 0 ;;
     esac
 fi
@@ -451,7 +456,6 @@ flock -n 200 || { echo "Another instance is running, exiting."; exit 5; }
 if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$MAX_LOG_SIZE" ]; then
     mv "$LOG_FILE" "${LOG_FILE}.$(date +%Y%m%d_%H%M%S)"
     touch "$LOG_FILE"
-    # Clean up old log files
     find "$(dirname "$LOG_FILE")" -name "$(basename "$LOG_FILE").*" -type f -mtime +"$LOG_RETENTION_DAYS" -delete
 fi
 
@@ -466,11 +470,13 @@ RSYNC_OPTS=("${RSYNC_BASE_OPTS[@]}")
 
 if [[ "$VERBOSE_MODE" == "true" ]]; then
     RSYNC_OPTS+=(--info=stats2,progress2)
-    nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>&1 | tee "$RSYNC_LOG_TMP"
+    # shellcheck disable=SC2086
+    nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" $BACKUP_DIRS "$REMOTE_TARGET" 2>&1 | tee "$RSYNC_LOG_TMP"
     RSYNC_EXIT_CODE=${PIPESTATUS[0]}
 else
     RSYNC_OPTS+=(--info=stats2)
-    nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
+    # shellcheck disable=SC2086
+    nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" $BACKUP_DIRS "$REMOTE_TARGET" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
 fi
 
 END_TIME=$(date +%s)
