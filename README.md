@@ -21,26 +21,20 @@ This script is for automating backups of a local directory to a remote server (l
 ## Usage
 
   - **Download script and configuration file**:
-    You'll need two files: the script itself and the new unified configuration file.
-
-    *(Note: The `wget` commands below are for illustration. You will copy the final versions from this document).*
+    You'll need two files: the script itself and the configuration file.
 
     ```sh
     # 1. Get the script and make it executable
-    wget <URL_to_your_new_script>/backup_script.sh && chmod +x backup_script.sh
+    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/improve/backup_script.sh && chmod +x backup_script.sh
 
     # 2. Get the new unified config file and set secure permissions
-    wget <URL_to_your_new_config>/backup.conf && chmod 600 backup.conf
+    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/improve/backup.conf && chmod 600 backup.conf
     ```
 
   - **Run Silently**: `sudo ./backup_script.sh` (for cron)
-
   - **Run with Live Progress**: `sudo ./backup_script.sh --verbose`
-
   - **Dry Run**: `sudo ./backup_script.sh --dry-run` (see what would change without doing anything)
-
   - **Check Integrity**: `sudo ./backup_script.sh --checksum` (Compares local and remote files using checksums; can be slow but is very thorough).
-
   - **Get Mismatch Count**: `sudo ./backup_script.sh --summary` (Quickly reports the number of files that differ between local and remote).
 
 *The log file is located at `/var/log/backup_rsync.log` by default.*
@@ -151,8 +145,6 @@ To run the backup automatically, edit the root crontab.
 -----
 
 ## The Files
-
-Here are the complete and final versions of your two files.
 
 ### **`backup.conf`**
 
