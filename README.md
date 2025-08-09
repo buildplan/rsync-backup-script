@@ -21,13 +21,13 @@ This script is for automating backups of a local directory to a remote server (l
 ## Usage
 
   - **Download script and configuration file**:
-    You'll need two files: the script itself and the configuration file.
+    You'll need two files: the script and the configuration file.
 
     ```sh
     # 1. Get the script and make it executable
     wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup_script.sh && chmod +x backup_script.sh
 
-    # 2. Get the new unified config file and set secure permissions
+    # 2. Get the config file and set secure permissions
     wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup.conf && chmod 600 backup.conf
     ```
 
