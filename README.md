@@ -161,7 +161,9 @@ BOX_DIR="/home/myvps/"
 
 # --- Connection Details ---
 HETZNER_BOX="u444300-sub4@u444300.your-storagebox.de"
-# Add any other SSH options here, e.g., "-p 23 -i /path/to/key"
+
+# Add any other SSH options here. They will be split by spaces.
+# Example: -p 23 -i /root/.ssh/hetzner_key
 SSH_OPTS_STR="-p 23"
 
 # --- Logging ---
@@ -210,7 +212,7 @@ END_EXCLUDES
 #!/bin/bash
 
 # =================================================================
-#               SCRIPT INITIALIZATION & SETUP
+#                 SCRIPT INITIALIZATION & SETUP
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -231,6 +233,8 @@ EXCLUDE_FILE_TMP=$(mktemp)
 
 # --- Securely parse the unified configuration file ---
 if [ -f "$CONFIG_FILE" ]; then
+    # Initialize an empty array for SSH options for robustness
+    SSH_OPTS_ARR=()
     in_exclude_block=false
     while IFS= read -r line; do
         # Handle the rsync exclusion block
@@ -255,8 +259,13 @@ if [ -f "$CONFIG_FILE" ]; then
             # Remove surrounding quotes from value
             value="${value%\"}"; value="${value#\"}"
             
-            ### CRITICAL SECURITY FIX: Assign value as a literal string ###
+            # CRITICAL: Assign value as a literal string to prevent code injection
             declare "$key"="$value"
+
+            # Robustly handle SSH options by converting the string to an array
+            if [[ "$key" == "SSH_OPTS_STR" ]]; then
+                read -r -a SSH_OPTS_ARR <<< "$value"
+            fi
         fi
     done < "$CONFIG_FILE"
 else
@@ -273,7 +282,7 @@ MAX_LOG_SIZE=10485760 # 10 MB in bytes
 RSYNC_BASE_OPTS=(
     -a -z --delete --partial --timeout=60
     --exclude-from="$EXCLUDE_FILE_TMP"
-    -e "ssh ${SSH_OPTS_STR:-}"
+    -e "ssh ${SSH_OPTS_ARR[@]}"
 )
 
 # =================================================================
@@ -316,7 +325,7 @@ send_notification() {
 }
 
 run_integrity_check() {
-    local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
+    local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_ARR[@]}")
     LC_ALL=C rsync "${rsync_check_opts[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>> "${LOG_FILE:-/dev/null}"
 }
 
@@ -367,7 +376,7 @@ for cmd in "${REQUIRED_CMDS[@]}"; do
     fi
 done
 
-if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
+if ! ssh "${SSH_OPTS_ARR[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
     send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "high" "failure" "Unable to SSH into $HETZNER_BOX. Check keys and connectivity."
     trap - ERR; exit 6
 fi
