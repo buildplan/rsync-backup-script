@@ -1,76 +1,83 @@
 # Automated rsync Backup Script
 
-This is a robust script for automating backups of a local directory to a remote server (like a Hetzner Storage Box) using `rsync` over SSH.
+This script is for automating backups of a local directory to a remote server (like a Hetzner Storage Box) using `rsync` over SSH.
 
----
+-----
 
 ## Features
 
--   **External & Secure Configuration**: Settings are external; credentials are parsed safely to prevent code injection.
--   **Portable**: The entire backup setup (script + configs) can be moved to a new server by copying one directory.
--   **Multi-Notification Support**: Sends notifications to **ntfy** and/or **Discord**, configurable with simple toggles.
--   **Robust Error Handling**: Uses `set -Euo pipefail` and a global `ERR` trap to catch and report any unexpected errors.
--   **Informative Reports**: Notifications include transfer size, files created, and files deleted.
--   **Production Ready**: Uses `nice` and `ionice` to limit CPU/IO impact on the server.
--   **User-Friendly Modes**: Includes `--dry-run`, `--checksum`, `--summary`, and a `--verbose` flag for live progress on manual runs.
--   **Robust Error Handling**: Uses `set -Euo pipefail`, a global `ERR` trap, and handles specific `rsync` exit codes (e.g., warnings vs. failures).
--   **Locking & Log Rotation**: Prevents concurrent runs and manages log file size automatically.
--   **Prerequisite Checks**: Verifies that all required commands and SSH connectivity are working before running. 
+  - **Unified & Secure Configuration**: All settings are in a single `backup.conf` file, parsed safely to prevent code injection.
+  - **Portable**: The entire backup setup (script + config) can be moved to a new server by copying one directory.
+  - **Multi-Notification Support**: Sends notifications to **ntfy** and/or **Discord**, configurable with simple toggles.
+  - **Robust Error Handling**: Uses `set -Euo pipefail` and a global `ERR` trap to catch and report any unexpected errors.
+  - **Informative Reports**: Notifications include transfer size, files created, and files deleted.
+  - **Production Ready**: Uses `nice` and `ionice` to limit CPU/IO impact on the server.
+  - **User-Friendly Modes**: Includes `--dry-run`, `--checksum`, `--summary`, and a `--verbose` flag for live progress on manual runs.
+  - **Locking & Log Rotation**: Prevents concurrent runs and manages log file size automatically.
+  - **Prerequisite Checks**: Verifies that all required commands and SSH connectivity are working before running.
+
+-----
 
 ## Usage
 
--   **Download script and configuration file**: also make script executable and set permissions for conf files)
-  
+  - **Download script and configuration file**:
+    You'll need two files: the script itself and the new unified configuration file.
+
+    *(Note: The `wget` commands below are for illustration. You will copy the final versions from this document).*
+
+    ```sh
+    # 1. Get the script and make it executable
+    wget <URL_to_your_new_script>/backup_script.sh && chmod +x backup_script.sh
+
+    # 2. Get the new unified config file and set secure permissions
+    wget <URL_to_your_new_config>/backup.conf && chmod 600 backup.conf
     ```
-    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup_script.sh && chmod +x backup_script.sh
-    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/credentials.conf && chmod 600 credentials.conf
-    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup_rsync.conf && chmod 600 backup_rsync.conf
-    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/rsync_exclude.txt
-    ```
--   **Run Silently**: `sudo ./backup_script.sh` (for cron)
--   **Run with Live Progress**: `sudo ./backup_script.sh --verbose`
--   **Dry Run**: `sudo ./backup_script.sh --dry-run` (see what would change without doing anything)
--   **Check Integrity**: `sudo ./backup_script.sh --checksum` (Compares local and remote files using checksums; can be slow but is very thorough).
--   **Get Mismatch Count**: `sudo ./backup_script.sh --summary` (Quickly reports the number of files that differ between local and remote).
+
+  - **Run Silently**: `sudo ./backup_script.sh` (for cron)
+
+  - **Run with Live Progress**: `sudo ./backup_script.sh --verbose`
+
+  - **Dry Run**: `sudo ./backup_script.sh --dry-run` (see what would change without doing anything)
+
+  - **Check Integrity**: `sudo ./backup_script.sh --checksum` (Compares local and remote files using checksums; can be slow but is very thorough).
+
+  - **Get Mismatch Count**: `sudo ./backup_script.sh --summary` (Quickly reports the number of files that differ between local and remote).
 
 *The log file is located at `/var/log/backup_rsync.log` by default.*
 
----
+-----
 
 ## File Structure
 
-All files should be placed in a single directory (e.g., `/home/user/scripts/backup`).
+All files should be placed in a single directory (e.g., `/home/user/scripts/backup`). The new structure is simpler with only two files to manage.
 
 ```
-
 /home/user/scripts/backup/
-├── backup_script.sh         (The main script)
-├── backup_rsync.conf        (Your main backup settings)
-├── credentials.conf         (Your secret token and ntfy URL)
-└── rsync_exclude.txt        (Files and patterns to exclude)
+├── backup_script.sh      (The main script)
+└── backup.conf           (Your unified settings, credentials, and excludes)
+```
 
-````
-
----
+-----
 
 ## Setup Instructions
 
 Follow these steps to get the backup system running.
 
-### 1. Prerequisites
+### 1\. Prerequisites
 
 First, ensure the required tools are installed. On Debian/Ubuntu, you can run:
+
 ```sh
 sudo apt-get update && sudo apt-get install rsync curl coreutils util-linux
-````
+```
 
-*(coreutils provides `numfmt`, `stat`, etc. and util-linux provides `flock`)*
+*(coreutils provides `numfmt`, `stat`, etc. and util-linux provides `flock` and `mktemp`)*
 
 ### 2\. Passwordless SSH Login
 
 The script needs to log into the Hetzner Storage Box without a password.
 
-  - **Generate a root user SSH key** on your server if you don't have one: (using root will avoid the permissions issues)
+  - **Generate a root user SSH key** on your server if you don't have one (using root will avoid permissions issues):
 
     ```sh
     sudo ssh-keygen -t ed25519
@@ -83,19 +90,23 @@ The script needs to log into the Hetzner Storage Box without a password.
     ```sh
     sudo cat /root/.ssh/id_ed25519.pub
     ```
+
     *If you encounter permission issues use `sudo su` to access root directly.*
 
   - Go to your Hetzner Robot panel, select your Storage Box, and paste the entire public key content into the "SSH Keys" section.
-  - Or use the `ssh-copy-id` command like this: (Replace `u444300` and the hostname with your own details.)
+
+  - Or use the `ssh-copy-id` command (replace `u444300` and the hostname with your own details):
+
     ```sh
     sudo ssh-copy-id -p 23 -s u444300-sub4@u444300.your-storagebox.de
     ```
-    Hetzner Storage Box requires -s flag.
 
-  - **Test the connection**.
+    *Hetzner Storage Box requires the `-s` flag.*
+
+  - **Test the connection**. You can find the correct port and user in your `backup.conf` file.
 
     ```sh
-    sudo ssh -p 23 -s u444300-sub4@u444300.your-storagebox.de 'echo "Connection successful"'
+    sudo ssh -p 23 u444300-sub4@u444300.your-storagebox.de 'echo "Connection successful"'
     ```
 
     If this works without asking for a password, you are ready.
@@ -103,34 +114,101 @@ The script needs to log into the Hetzner Storage Box without a password.
 ### 3\. Place and Configure Files
 
 1.  Create your script directory: `mkdir -p /home/user/scripts/backup && cd /home/user/scripts/backup`
-2.  Create the four files (`backup_script.sh`, `backup_rsync.conf`, `credentials.conf`, `rsync_exclude.txt`) in this directory using the content provided below.
+2.  Create the two files (`backup_script.sh` and `backup.conf`) in this directory using the content provided below.
 3.  **Make the script executable**:
     ```sh
     chmod +x backup_script.sh
     ```
-4.  **Set secure permissions** for your credentials:
+4.  **Set secure permissions** for your configuration file:
     ```sh
-    chmod 600 credentials.conf backup_rsync.conf
+    chmod 600 backup.conf
     ```
-5.  Edit `backup_rsync.conf` and `credentials.conf` to match your server paths, Hetzner details, and ntfy topic.
-6.  Edit `rsync_exclude.txt` to list any files or directories you wish to skip.
+5.  Edit **`backup.conf`** to match your server paths, Hetzner details, notification credentials, and to customize your exclusion list.
 
 ### 4\. Set up a Cron Job
 
 To run the backup automatically, edit the root crontab.
 
   - Open the crontab editor:
+
     ```sh
     sudo crontab -e
     ```
+
   - Add a line to schedule the script. This example runs the backup every day at 3:00 AM.
+
     ```crontab
     # Run the rsync backup every day at 3:00 AM
     0 3 * * * /home/user/scripts/backup/backup_script.sh >/dev/null 2>&1
     ```
+
     *(Redirecting output to `/dev/null` is fine since the script handles its own logging and notifications).*
-    
+
     *(Note: `sudo` is not needed here because this command is placed in the root user's crontab via `sudo crontab -e`, so it already runs with root privileges.)*
+
+-----
+
+-----
+
+## The Files
+
+Here are the complete and final versions of your two files.
+
+### **`backup.conf`**
+
+```ini
+# =================================================================
+#      Unified Configuration for rsync Backup Script
+# =================================================================
+# !! IMPORTANT !! Set file permissions to 600 (chmod 600 backup.conf)
+
+# --- Source and Destination ---
+# IMPORTANT: LOCAL_DIR must end with a trailing slash!
+LOCAL_DIR="/home/user/"
+BOX_DIR="/home/myvps/"
+
+# --- Connection Details ---
+HETZNER_BOX="u444300-sub4@u444300.your-storagebox.de"
+# Add any other SSH options here, e.g., "-p 23 -i /path/to/key"
+SSH_OPTS_STR="-p 23"
+
+# --- Logging ---
+LOG_FILE="/var/log/backup_rsync.log"
+
+# --- Notification Toggles ---
+# Set to 'true' to enable, 'false' to disable.
+NTFY_ENABLED=true
+DISCORD_ENABLED=false
+
+# --- ntfy Credentials ---
+NTFY_TOKEN="tk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+NTFY_URL="https://ntfy.sh/your-private-topic-name"
+
+# --- Discord Credentials ---
+DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/your/webhook_url_here"
+
+# --- rsync Exclusions ---
+# List all file/directory patterns to exclude below.
+# The script will read everything between the BEGIN and END markers.
+BEGIN_EXCLUDES
+# Common cache and temporary files
+.cache/
+/tmp/
+*.tmp
+*.bak
+*.swp
+
+# Specific application caches/dependencies
+/node_modules/
+/vendor/
+__pycache__/
+
+# System files that shouldn't be backed up
+/lost+found/
+.DS_Store
+Thumbs.db
+END_EXCLUDES
+```
 
 -----
 
@@ -140,7 +218,7 @@ To run the backup automatically, edit the root crontab.
 #!/bin/bash
 
 # =================================================================
-#               SCRIPT INITIALIZATION & SETUP
+#           SCRIPT INITIALIZATION & SETUP
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -151,30 +229,49 @@ if (( EUID != 0 )); then
     exit 1
 fi
 
-# --- Determine script's location to load local config files ---
+# --- Determine script's location to load the config file ---
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+CONFIG_FILE="${SCRIPT_DIR}/backup.conf"
 
-# --- Source Configuration Files ---
-if [ -f "${SCRIPT_DIR}/backup_rsync.conf" ]; then
-    source "${SCRIPT_DIR}/backup_rsync.conf"
-else
-    echo "FATAL: Main configuration file backup_rsync.conf not found." >&2; exit 1
-fi
+# --- Create a temporary file for rsync exclusions ---
+# This file will be populated from the config and cleaned up automatically on exit.
+EXCLUDE_FILE_TMP=$(mktemp)
 
-# Securely load credentials by parsing the file to prevent code injection
-if [ -f "${SCRIPT_DIR}/credentials.conf" ]; then
-    while IFS='=' read -r key value; do
-        [[ "$key" =~ ^\s*#|^\s*$ ]] && continue
-        value="${value%\"}"; value="${value#\"}"
-        key=$(echo "$key" | tr -d '[:space:]')
-        declare "$key=$value"
-    done < "${SCRIPT_DIR}/credentials.conf"
+# --- Securely parse the unified configuration file ---
+if [ -f "$CONFIG_FILE" ]; then
+    in_exclude_block=false
+    while IFS= read -r line; do
+        # Handle the rsync exclusion block
+        if [[ "$line" == "BEGIN_EXCLUDES" ]]; then
+            in_exclude_block=true
+            continue
+        elif [[ "$line" == "END_EXCLUDES" ]]; then
+            in_exclude_block=false
+            continue
+        fi
+
+        if $in_exclude_block; then
+            # Append non-empty, non-comment lines to the temp exclude file
+            [[ ! "$line" =~ ^\s*#|^\s*$ ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
+            continue
+        fi
+
+        # Handle key-value pairs
+        if [[ "$line" =~ ^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.*) ]]; then
+            key="${BASH_REMATCH[1]}"
+            value="${BASH_REMATCH[2]}"
+            # Remove surrounding quotes from value
+            value="${value%\"}"; value="${value#\"}"
+            # Declare the variable in the script's scope
+            declare "$key=$value"
+        fi
+    done < "$CONFIG_FILE"
 else
-    echo "FATAL: Credentials file credentials.conf not found." >&2; exit 1
+    echo "FATAL: Unified configuration file backup.conf not found." >&2; exit 1
 fi
 
 # =================================================================
-#               SCRIPT CONFIGURATION (STATIC)
+#           SCRIPT CONFIGURATION (STATIC)
 # =================================================================
 REMOTE_TARGET="${HETZNER_BOX}:${BOX_DIR}"
 LOCK_FILE="/tmp/backup_rsync.lock"
@@ -182,8 +279,8 @@ MAX_LOG_SIZE=10485760 # 10 MB in bytes
 
 RSYNC_BASE_OPTS=(
     -a -z --delete --partial --timeout=60
-    --exclude-from="$EXCLUDE_FROM"
-    -e "$(printf "%s " "${SSH_OPTS[@]}")"
+    --exclude-from="$EXCLUDE_FILE_TMP"
+    -e "ssh ${SSH_OPTS_STR:-}"
 )
 
 # =================================================================
@@ -211,7 +308,7 @@ send_discord() {
         success) color=3066993 ;;  # Green
         warning) color=16776960 ;; # Yellow
         failure) color=15158332 ;; # Red
-        *)       color=9807270 ;;   # Grey
+        *)      color=9807270 ;;   # Grey
     esac
     local escaped_message; escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload; printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
@@ -226,7 +323,7 @@ send_notification() {
 }
 
 run_integrity_check() {
-    local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FROM" --out-format="%n" -e "$(printf "%s " "${SSH_OPTS[@]}")")
+    local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
     LC_ALL=C rsync "${rsync_check_opts[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>> "$LOG_FILE"
 }
 
@@ -237,19 +334,16 @@ format_backup_stats() {
     local files_created=""
     local files_deleted=""
 
-    # First, try to parse the new rsync format (e.g., "Number_of_created_files: 200")
     bytes_transferred=$(echo "$rsync_output" | grep 'Total_transferred_size:' | awk '{print $2}')
     files_created=$(echo "$rsync_output" | grep 'Number_of_created_files:' | awk '{print $2}')
     files_deleted=$(echo "$rsync_output" | grep 'Number_of_deleted_files:' | awk '{print $2}')
 
-    # If the variables are empty, it means we have the older format. Fall back to parsing that.
     if [[ -z "$bytes_transferred" && -z "$files_created" && -z "$files_deleted" ]]; then
         bytes_transferred=$(echo "$rsync_output" | grep 'Total transferred file size:' | awk '{gsub(/,/, ""); print $5}')
         files_created=$(echo "$rsync_output" | grep 'Number of created files:' | awk '{print $5}')
         files_deleted=$(echo "$rsync_output" | grep 'Number of deleted files:' | awk '{print $5}')
     fi
 
-    # Format the final output string
     if [[ "${bytes_transferred:-0}" -gt 0 ]]; then
         stats_summary=$(printf "Data Transferred: %s" "$(numfmt --to=iec-i --suffix=B --format="%.2f" "$bytes_transferred")")
     else
@@ -261,33 +355,32 @@ format_backup_stats() {
 }
 
 cleanup() {
-    rm -f "${RSYNC_LOG_TMP:-}"
+    rm -f "${EXCLUDE_FILE_TMP:-}" "${RSYNC_LOG_TMP:-}"
 }
 
 # =================================================================
-#               PRE-FLIGHT CHECKS & SETUP
+#           PRE-FLIGHT CHECKS & SETUP
 # =================================================================
 
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "high" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE}"' ERR
 
-REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed)
+REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp)
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "FATAL: Required command '$cmd' not found. Please install it." >&2; trap - ERR; exit 10
     fi
 done
 
-if ! "${SSH_OPTS[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
+if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
     send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "high" "failure" "Unable to SSH into $HETZNER_BOX. Check keys and connectivity."
     trap - ERR; exit 6
 fi
 
-if ! [ -f "$EXCLUDE_FROM" ]; then send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "FATAL: Exclude file not found at $EXCLUDE_FROM"; trap - ERR; exit 3; fi
 if [[ "$LOCAL_DIR" != */ ]]; then send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "FATAL: LOCAL_DIR must end with a trailing slash ('/')"; trap - ERR; exit 2; fi
 
 # =================================================================
-#                       SCRIPT EXECUTION
+#                   SCRIPT EXECUTION
 # =================================================================
 
 HOSTNAME=$(hostname -s)
@@ -300,11 +393,10 @@ if [[ "${1:-}" ]]; then
     trap - ERR 
     case "${1}" in
         --dry-run)
-            # Disable the global "crash" trap for this specific mode
             trap - ERR
             echo "--- DRY RUN MODE ACTIVATED ---"
             if ! rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 "$LOCAL_DIR" "$REMOTE_TARGET"; then
-                echo "" # Add a newline for spacing
+                echo ""
                 echo "❌ Dry run FAILED. See the rsync error message above for details."
                 exit 1
             fi
@@ -326,7 +418,6 @@ if [[ "${1:-}" ]]; then
                 send_notification "❌ Backup Integrity FAILED: ${HOSTNAME}" "x" "high" "failure" "${FAILURE_MSG}"
             fi
             exit 0 ;;
-
         --summary)
             echo "--- INTEGRITY SUMMARY MODE ---"
             echo "Calculating differences..."
@@ -391,84 +482,4 @@ esac
 
 echo "======================= Run Finished =======================" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
-```
-
------
-
-### **`backup_rsync.conf`**
-
-```bash
-# Configuration for the rsync backup script
-
-# --- Source and Destination ---
-# IMPORTANT: LOCAL_DIR must end with a trailing slash!
-LOCAL_DIR="/home/user/"
-
-# Directory on the remote storage box
-BOX_DIR="/home/myvps/"
-
-# --- Connection Details ---
-# Hetzner Storage Box details (username and hostname)
-HETZNER_BOX="u444300-sub4@u444300.your-storagebox.de"
-
-# Flexible SSH options array. Add more options if needed (e.g., -i /path/to/key).
-SSH_OPTS=(
-    ssh
-    -p 23
-)
-
-# --- Logging ---
-LOG_FILE="/var/log/backup_rsync.log"
-
-# --- Exclude File ---
-EXCLUDE_FROM="${SCRIPT_DIR}/rsync_exclude.txt"
-
-# --- NOTIFICATION SETTINGS ---
-# Set to 'true' to enable a service, 'false' to disable.
-NTFY_ENABLED=true
-DISCORD_ENABLED=false
-
-```
-
------
-
-### **`credentials.conf`**
-
-```ini
-# Sensitive information for the backup script
-# !! IMPORTANT !! Set permissions to 600 for this file and backup_rsync.conf
-
-# --- ntfy Credentials ---
-NTFY_TOKEN="tk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-NTFY_URL="https://ntfy.sh/your-private-topic-name"
-
-# --- Discord Credentials (optional) ---
-DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/your/webhook_url_here"
-
-```
-
------
-
-### **`rsync_exclude.txt`**
-
-```
-# List of files/directories to exclude from backup, one per line.
-# See 'man rsync' for pattern matching rules.
-
-# Common cache and temporary files
-.cache/
-/tmp/
-*.tmp
-*.bak
-*.swp
-
-# Specific application caches/dependencies
-/node_modules/
-/vendor/
-__pycache__/
-
-# System files that shouldn't be backed up
-/lost+found/
-.DS_Store
-Thumbs.db
 ```
