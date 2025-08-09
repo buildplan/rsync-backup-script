@@ -2,7 +2,7 @@
 
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
-#                       v0.10 - 2025.08.09
+#                      v0.10 - 2025.08.09
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -111,12 +111,8 @@ send_notification() {
 run_integrity_check() {
     local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
     
-    # Loop through each source directory and run a separate check
     for dir in $BACKUP_DIRS; do
-        # Create a unique destination path using the base name of the source dir
-        local remote_subdir
-        remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
-        
+        local remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
         # shellcheck disable=SC2086
         LC_ALL=C rsync "${rsync_check_opts[@]}" "$dir" "$remote_subdir" 2>> "${LOG_FILE:-/dev/null}"
     done
@@ -134,7 +130,7 @@ parse_stat() {
 
 format_backup_stats() {
     local rsync_output="$1"
-
+    
     local bytes_transferred=$(parse_stat "$rsync_output" 'Total_transferred_size:' '{print $2}')
     local files_created=$(parse_stat "$rsync_output" 'Number_of_created_files:' '{print $2}')
     local files_deleted=$(parse_stat "$rsync_output" 'Number_of_deleted_files:' '{print $2}')
@@ -152,7 +148,7 @@ format_backup_stats() {
         stats_summary="Data Transferred: 0 B (No changes)"
     fi
     stats_summary+=$(printf "\nFiles Created: %s\nFiles Deleted: %s" "${files_created:-0}" "${files_deleted:-0}")
-
+    
     printf "%s\n" "$stats_summary"
 }
 
@@ -203,15 +199,25 @@ if [[ "${1:-}" ]]; then
         --dry-run)
             trap - ERR
             echo "--- DRY RUN MODE ACTIVATED ---"
-            # shellcheck disable=SC2086
-            if ! rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 $BACKUP_DIRS "$REMOTE_TARGET"; then
-                echo ""
-                echo "❌ Dry run FAILED. See the rsync error message above for details."
-                exit 1
+            DRY_RUN_FAILED=false
+            # CORRECTED: Dry run must also loop to accurately simulate the backup
+            for dir in $BACKUP_DIRS; do
+                remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
+                echo "--- Checking dry run for: $dir -> $remote_subdir"
+                # shellcheck disable=SC2086
+                if ! rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 "$dir" "$remote_subdir"; then
+                    DRY_RUN_FAILED=true
+                fi
+            done
+
+            if [[ "$DRY_RUN_FAILED" == "true" ]]; then
+                 echo ""
+                 echo "❌ Dry run FAILED for one or more directories. See the rsync error messages above for details."
+                 exit 1
             fi
             echo "--- DRY RUN COMPLETED ---"; exit 0 ;;
+
         --checksum | --summary)
-            # Both modes use the same check, just with different reporting
             echo "--- INTEGRITY CHECK MODE ACTIVATED ---"
             echo "Calculating differences..."
             FILE_DISCREPANCIES=$(run_integrity_check)
@@ -260,7 +266,6 @@ full_rsync_output=""
 for dir in $BACKUP_DIRS; do
     log_message "Backing up directory: $dir"
     
-    # Create a unique destination path using the base name of the source dir
     remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
     
     RSYNC_LOG_TMP=$(mktemp)
@@ -278,9 +283,8 @@ for dir in $BACKUP_DIRS; do
         nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$remote_subdir" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
     fi
 
-    # Append individual log to main log and full output
     cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"
-    full_rsync_output+=$(<"$RSYNC_LOG_TMP")
+    full_rsync_output+=$'\n'"$(<"$RSYNC_LOG_TMP")"
     rm -f "$RSYNC_LOG_TMP"
 
     if [[ $RSYNC_EXIT_CODE -eq 0 || $RSYNC_EXIT_CODE -eq 24 ]]; then
@@ -305,16 +309,13 @@ BACKUP_STATS=$(format_backup_stats "$full_rsync_output")
 FINAL_MESSAGE=$(printf "%s\n\nDuration: %dm %ds" "$BACKUP_STATS" $((DURATION / 60)) $((DURATION % 60)))
 
 if [[ ${#failed_dirs[@]} -eq 0 ]]; then
-    # All successful
     log_message "SUCCESS: All backups completed."
     if [[ $overall_exit_code -eq 24 ]]; then
-        # All successful, but with a warning
         send_notification "⚠️ Backup Warning: ${HOSTNAME}" "warning" "${NTFY_PRIORITY_WARNING}" "warning" "$FINAL_MESSAGE"
     else
         send_notification "✅ Backup SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "$FINAL_MESSAGE"
     fi
 else
-    # Partial or total failure
     printf -v FAIL_MSG "One or more backups failed.\n\nSuccessful: %s\nFailed: %s\n\n%s" \
         "${success_dirs[*]:-None}" "${failed_dirs[*]}" "$FINAL_MESSAGE"
     log_message "FAILURE: One or more backups failed."
