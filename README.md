@@ -163,11 +163,12 @@ BOX_DIR="/home/myvps/"
 HETZNER_BOX="u444300-sub4@u444300.your-storagebox.de"
 
 # Add any other SSH options here. They will be split by spaces.
-# Example: -p 23 -i /root/.ssh/hetzner_key
+# Example for using a specific SSH key: -p 23 -i /root/.ssh/id_hetzner_key
 SSH_OPTS_STR="-p 23"
 
 # --- Logging ---
 LOG_FILE="/var/log/backup_rsync.log"
+LOG_RETENTION_DAYS=90 # Delete rotated logs older than this many days
 
 # --- Notification Toggles ---
 # Set to 'true' to enable, 'false' to disable.
@@ -264,7 +265,8 @@ fi
 
 # --- Validate that all required configuration variables are set ---
 for var in LOCAL_DIR BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE \
-           NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE; do
+           NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE \
+           LOG_RETENTION_DAYS; do
     if [ -z "${!var:-}" ]; then
         echo "FATAL: Required config variable '$var' is missing or empty in $CONFIG_FILE." >&2
         exit 1
@@ -447,6 +449,8 @@ flock -n 200 || { echo "Another instance is running, exiting."; exit 5; }
 if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$MAX_LOG_SIZE" ]; then
     mv "$LOG_FILE" "${LOG_FILE}.$(date +%Y%m%d_%H%M%S)"
     touch "$LOG_FILE"
+    # Clean up old log files
+    find "$(dirname "$LOG_FILE")" -name "$(basename "$LOG_FILE").*" -type f -mtime +"$LOG_RETENTION_DAYS" -delete
 fi
 
 echo "============================================================" >> "$LOG_FILE"
