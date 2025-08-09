@@ -2,7 +2,7 @@
 
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
-#                       v0.9 - 2025.08.09
+#                       v0.10 - 2025.08.09
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -110,8 +110,16 @@ send_notification() {
 
 run_integrity_check() {
     local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
-    # shellcheck disable=SC2086
-    LC_ALL=C rsync "${rsync_check_opts[@]}" $BACKUP_DIRS "$REMOTE_TARGET" 2>> "${LOG_FILE:-/dev/null}"
+    
+    # Loop through each source directory and run a separate check
+    for dir in $BACKUP_DIRS; do
+        # Create a unique destination path using the base name of the source dir
+        local remote_subdir
+        remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
+        
+        # shellcheck disable=SC2086
+        LC_ALL=C rsync "${rsync_check_opts[@]}" "$dir" "$remote_subdir" 2>> "${LOG_FILE:-/dev/null}"
+    done
 }
 
 parse_stat() {
@@ -242,47 +250,76 @@ fi
 echo "============================================================" >> "$LOG_FILE"
 log_message "Starting rsync backup..."
 
+# --- Execute Backup for Each Directory ---
 START_TIME=$(date +%s)
+success_dirs=()
+failed_dirs=()
+overall_exit_code=0
+full_rsync_output=""
 
-RSYNC_LOG_TMP=$(mktemp)
-RSYNC_EXIT_CODE=0
-RSYNC_OPTS=("${RSYNC_BASE_OPTS[@]}")
+for dir in $BACKUP_DIRS; do
+    log_message "Backing up directory: $dir"
+    
+    # Create a unique destination path using the base name of the source dir
+    remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
+    
+    RSYNC_LOG_TMP=$(mktemp)
+    RSYNC_EXIT_CODE=0
+    RSYNC_OPTS=("${RSYNC_BASE_OPTS[@]}")
 
-if [[ "$VERBOSE_MODE" == "true" ]]; then
-    RSYNC_OPTS+=(--info=stats2,progress2)
-    # shellcheck disable=SC2086
-    nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" $BACKUP_DIRS "$REMOTE_TARGET" 2>&1 | tee "$RSYNC_LOG_TMP"
-    RSYNC_EXIT_CODE=${PIPESTATUS[0]}
-else
-    RSYNC_OPTS+=(--info=stats2)
-    # shellcheck disable=SC2086
-    nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" $BACKUP_DIRS "$REMOTE_TARGET" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
-fi
+    if [[ "$VERBOSE_MODE" == "true" ]]; then
+        RSYNC_OPTS+=(--info=stats2,progress2)
+        # shellcheck disable=SC2086
+        nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$remote_subdir" 2>&1 | tee "$RSYNC_LOG_TMP"
+        RSYNC_EXIT_CODE=${PIPESTATUS[0]}
+    else
+        RSYNC_OPTS+=(--info=stats2)
+        # shellcheck disable=SC2086
+        nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$remote_subdir" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
+    fi
+
+    # Append individual log to main log and full output
+    cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"
+    full_rsync_output+=$(<"$RSYNC_LOG_TMP")
+    rm -f "$RSYNC_LOG_TMP"
+
+    if [[ $RSYNC_EXIT_CODE -eq 0 || $RSYNC_EXIT_CODE -eq 24 ]]; then
+        success_dirs+=("$(basename "$dir")")
+        if [[ $RSYNC_EXIT_CODE -eq 24 ]]; then
+            log_message "WARNING for $dir: rsync completed with code 24 (some source files vanished)."
+            overall_exit_code=24 # Mark the overall run as a warning
+        fi
+    else
+        failed_dirs+=("$(basename "$dir")")
+        log_message "FAILED for $dir: rsync exited with code: $RSYNC_EXIT_CODE."
+        overall_exit_code=1 # Mark the overall run as a failure
+    fi
+done
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
-
-cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"
-RSYNC_OUTPUT=$(<"$RSYNC_LOG_TMP")
-
 trap - ERR
 
-case $RSYNC_EXIT_CODE in
-    0)
-        BACKUP_STATS=$(format_backup_stats "$RSYNC_OUTPUT")
-        SUCCESS_MSG=$(printf "%s\n\nDuration: %dm %ds" "$BACKUP_STATS" $((DURATION / 60)) $((DURATION % 60)))
-        log_message "SUCCESS: rsync completed."
-        send_notification "✅ Backup SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "$SUCCESS_MSG" ;;
-    24)
-        BACKUP_STATS=$(format_backup_stats "$RSYNC_OUTPUT")
-        WARN_MSG=$(printf "rsync completed with a warning (code 24).\nSome source files vanished during transfer.\n\n%s\n\nDuration: %dm %ds" "$BACKUP_STATS" $((DURATION / 60)) $((DURATION % 60)))
-        log_message "WARNING: rsync completed with code 24 (some source files vanished)."
-        send_notification "⚠️ Backup Warning: ${HOSTNAME}" "warning" "${NTFY_PRIORITY_WARNING}" "warning" "$WARN_MSG" ;;
-    *)
-        FAIL_MSG=$(printf "rsync failed on ${HOSTNAME} with exit code ${RSYNC_EXIT_CODE}. Check log for details.\n\nDuration: %dm %ds" $((DURATION / 60)) $((DURATION % 60)))
-        log_message "FAILED: rsync exited with code: $RSYNC_EXIT_CODE."
-        send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$FAIL_MSG" ;;
-esac
+# --- Final Notification Logic ---
+BACKUP_STATS=$(format_backup_stats "$full_rsync_output")
+FINAL_MESSAGE=$(printf "%s\n\nDuration: %dm %ds" "$BACKUP_STATS" $((DURATION / 60)) $((DURATION % 60)))
+
+if [[ ${#failed_dirs[@]} -eq 0 ]]; then
+    # All successful
+    log_message "SUCCESS: All backups completed."
+    if [[ $overall_exit_code -eq 24 ]]; then
+        # All successful, but with a warning
+        send_notification "⚠️ Backup Warning: ${HOSTNAME}" "warning" "${NTFY_PRIORITY_WARNING}" "warning" "$FINAL_MESSAGE"
+    else
+        send_notification "✅ Backup SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "$FINAL_MESSAGE"
+    fi
+else
+    # Partial or total failure
+    printf -v FAIL_MSG "One or more backups failed.\n\nSuccessful: %s\nFailed: %s\n\n%s" \
+        "${success_dirs[*]:-None}" "${failed_dirs[*]}" "$FINAL_MESSAGE"
+    log_message "FAILURE: One or more backups failed."
+    send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$FAIL_MSG"
+fi
 
 echo "======================= Run Finished =======================" >> "$LOG_FILE"
 echo "" >> "$LOG_FILE"
