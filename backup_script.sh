@@ -130,7 +130,7 @@ parse_stat() {
 
 format_backup_stats() {
     local rsync_output="$1"
-    
+
     local bytes_transferred=$(parse_stat "$rsync_output" 'Total_transferred_size:' '{print $2}')
     local files_created=$(parse_stat "$rsync_output" 'Number_of_created_files:' '{print $2}')
     local files_deleted=$(parse_stat "$rsync_output" 'Number_of_deleted_files:' '{print $2}')
@@ -148,7 +148,7 @@ format_backup_stats() {
         stats_summary="Data Transferred: 0 B (No changes)"
     fi
     stats_summary+=$(printf "\nFiles Created: %s\nFiles Deleted: %s" "${files_created:-0}" "${files_deleted:-0}")
-    
+
     printf "%s\n" "$stats_summary"
 }
 
@@ -200,7 +200,6 @@ if [[ "${1:-}" ]]; then
             trap - ERR
             echo "--- DRY RUN MODE ACTIVATED ---"
             DRY_RUN_FAILED=false
-            # CORRECTED: Dry run must also loop to accurately simulate the backup
             for dir in $BACKUP_DIRS; do
                 remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
                 echo "--- Checking dry run for: $dir -> $remote_subdir"
