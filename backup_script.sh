@@ -110,7 +110,7 @@ send_notification() {
 
 run_integrity_check() {
     local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
-    
+
     for dir in $BACKUP_DIRS; do
         local remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
         # shellcheck disable=SC2086
@@ -130,7 +130,7 @@ parse_stat() {
 
 format_backup_stats() {
     local rsync_output="$1"
-    
+
     local bytes_transferred=$(parse_stat "$rsync_output" 'Total_transferred_size:' '{s+=$2} END {print s}')
     local files_created=$(parse_stat "$rsync_output" 'Number_of_created_files:' '{s+=$2} END {print s}')
     local files_deleted=$(parse_stat "$rsync_output" 'Number_of_deleted_files:' '{s+=$2} END {print s}')
@@ -149,7 +149,7 @@ format_backup_stats() {
         stats_summary="Data Transferred: 0 B (No changes)"
     fi
     stats_summary+=$(printf "\nFiles Created: %s\nFiles Deleted: %s" "${files_created:-0}" "${files_deleted:-0}")
-    
+
     printf "%s\n" "$stats_summary"
 }
 
@@ -177,7 +177,7 @@ if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 
 fi
 
 for dir in $BACKUP_DIRS; do
-    if [[ ! -d "$dir" ]] || [[ "$dir" != */ ]]; then 
+    if [[ ! -d "$dir" ]] || [[ "$dir" != */ ]]; then
         send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: A directory in BACKUP_DIRS ('$dir') must exist and end with a trailing slash ('/')."
         trap - ERR; exit 2
     fi
@@ -221,7 +221,7 @@ if [[ "${1:-}" ]]; then
             echo "--- INTEGRITY CHECK MODE ACTIVATED ---"
             echo "Calculating differences..."
             FILE_DISCREPANCIES=$(run_integrity_check)
-            
+
             if [[ "$1" == "--summary" ]]; then
                 MISMATCH_COUNT=$(echo "$FILE_DISCREPANCIES" | wc -l)
                 printf "🚨 Total files with checksum mismatches: %d\n" "$MISMATCH_COUNT"
@@ -265,9 +265,9 @@ full_rsync_output=""
 
 for dir in $BACKUP_DIRS; do
     log_message "Backing up directory: $dir"
-    
+
     remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
-    
+
     RSYNC_LOG_TMP=$(mktemp)
     RSYNC_EXIT_CODE=0
     RSYNC_OPTS=("${RSYNC_BASE_OPTS[@]}")
