@@ -47,6 +47,8 @@ fi
 
 # --- Validate that all required configuration variables are set ---
 for var in LOCAL_DIR BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE \
+           NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE \
+           LOG_RETENTION_DAYS; do
            NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE; do
     if [ -z "${!var:-}" ]; then
         echo "FATAL: Required config variable '$var' is missing or empty in $CONFIG_FILE." >&2
@@ -230,6 +232,8 @@ flock -n 200 || { echo "Another instance is running, exiting."; exit 5; }
 if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$MAX_LOG_SIZE" ]; then
     mv "$LOG_FILE" "${LOG_FILE}.$(date +%Y%m%d_%H%M%S)"
     touch "$LOG_FILE"
+    # Clean up old log files
+    find "$(dirname "$LOG_FILE")" -name "$(basename "$LOG_FILE").*" -type f -mtime +"$LOG_RETENTION_DAYS" -delete
 fi
 
 echo "============================================================" >> "$LOG_FILE"
