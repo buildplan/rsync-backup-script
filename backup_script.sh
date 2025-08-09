@@ -144,7 +144,7 @@ format_backup_stats() {
     fi
     stats_summary+=$(printf "\nFiles Created: %s\nFiles Deleted: %s" "${files_created:-0}" "${files_deleted:-0}")
     
-    echo -e "$stats_summary"
+    printf "%s\n" "$stats_summary"
 }
 
 cleanup() {
