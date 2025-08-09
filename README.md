@@ -267,7 +267,6 @@ fi
 for var in LOCAL_DIR BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE \
            NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE \
            LOG_RETENTION_DAYS; do
-           NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE; do
     if [ -z "${!var:-}" ]; then
         echo "FATAL: Required config variable '$var' is missing or empty in $CONFIG_FILE." >&2
         exit 1
