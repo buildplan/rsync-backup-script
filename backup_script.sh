@@ -17,36 +17,27 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/backup.conf"
 
 # --- Create a temporary file for rsync exclusions ---
-# This file will be populated from the config and cleaned up automatically on exit.
 EXCLUDE_FILE_TMP=$(mktemp)
 
 # --- Securely parse the unified configuration file ---
 if [ -f "$CONFIG_FILE" ]; then
     in_exclude_block=false
     while IFS= read -r line; do
-        # Handle the rsync exclusion block
         if [[ "$line" == "BEGIN_EXCLUDES" ]]; then
-            in_exclude_block=true
-            continue
+            in_exclude_block=true; continue
         elif [[ "$line" == "END_EXCLUDES" ]]; then
-            in_exclude_block=false
-            continue
+            in_exclude_block=false; continue
         fi
 
         if $in_exclude_block; then
-            # Append non-empty, non-comment lines to the temp exclude file
             [[ ! "$line" =~ ^\s*#|^\s*$ ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
             continue
         fi
 
-        # Handle key-value pairs
         if [[ "$line" =~ ^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.*) ]]; then
             key="${BASH_REMATCH[1]}"
             value="${BASH_REMATCH[2]}"
-            # Remove surrounding quotes from value
             value="${value%\"}"; value="${value#\"}"
-            
-            # CRITICAL: Assign value as a literal string to prevent code injection
             declare "$key"="$value"
         fi
     done < "$CONFIG_FILE"
@@ -55,7 +46,8 @@ else
 fi
 
 # --- Validate that all required configuration variables are set ---
-for var in LOCAL_DIR BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE; do
+for var in LOCAL_DIR BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE \
+           NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE; do
     if [ -z "${!var:-}" ]; then
         echo "FATAL: Required config variable '$var' is missing or empty in $CONFIG_FILE." >&2
         exit 1
@@ -97,10 +89,10 @@ send_discord() {
     local title="$1" status="$2" message="$3"
     if [[ "${DISCORD_ENABLED:-false}" != "true" ]] || [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then return; fi
     local color; case "$status" in
-        success) color=3066993 ;;  # Green
-        warning) color=16776960 ;; # Yellow
-        failure) color=15158332 ;; # Red
-        *)       color=9807270 ;;   # Grey
+        success) color=3066993 ;;
+        warning) color=16776960 ;;
+        failure) color=15158332 ;;
+        *)       color=9807270 ;;
     esac
     local escaped_message; escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload; printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
@@ -109,9 +101,9 @@ send_discord() {
 }
 
 send_notification() {
-    local title="$1" tags="$2" priority="$3" status="$4" message="$5"
-    send_ntfy "$title" "$tags" "$priority" "$message"
-    send_discord "$title" "$status" "$message"
+    local title="$1" tags="$2" ntfy_priority="$3" discord_status="$4" message="$5"
+    send_ntfy "$title" "$tags" "$ntfy_priority" "$message"
+    send_discord "$title" "$discord_status" "$message"
 }
 
 run_integrity_check() {
@@ -119,7 +111,6 @@ run_integrity_check() {
     LC_ALL=C rsync "${rsync_check_opts[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>> "${LOG_FILE:-/dev/null}"
 }
 
-# This runs the pipeline in a subshell with 'pipefail' disabled to prevent script crashes.
 parse_stat() {
     local output="$1"
     local pattern="$2"
@@ -132,12 +123,11 @@ parse_stat() {
 
 format_backup_stats() {
     local rsync_output="$1"
-    
+
     local bytes_transferred=$(parse_stat "$rsync_output" 'Total_transferred_size:' '{print $2}')
     local files_created=$(parse_stat "$rsync_output" 'Number_of_created_files:' '{print $2}')
     local files_deleted=$(parse_stat "$rsync_output" 'Number_of_deleted_files:' '{print $2}')
 
-    # Fallback for older rsync versions
     if [[ -z "$bytes_transferred" && -z "$files_created" && -z "$files_deleted" ]]; then
         bytes_transferred=$(parse_stat "$rsync_output" 'Total transferred file size:' '{gsub(/,/, ""); print $5}')
         files_created=$(parse_stat "$rsync_output" 'Number of created files:' '{print $5}')
@@ -151,7 +141,7 @@ format_backup_stats() {
         stats_summary="Data Transferred: 0 B (No changes)"
     fi
     stats_summary+=$(printf "\nFiles Created: %s\nFiles Deleted: %s" "${files_created:-0}" "${files_deleted:-0}")
-    
+
     printf "%s\n" "$stats_summary"
 }
 
@@ -164,7 +154,7 @@ cleanup() {
 # =================================================================
 
 trap cleanup EXIT
-trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "high" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
+trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
 REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp)
 for cmd in "${REQUIRED_CMDS[@]}"; do
@@ -174,12 +164,12 @@ for cmd in "${REQUIRED_CMDS[@]}"; do
 done
 
 if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
-    send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "high" "failure" "Unable to SSH into $HETZNER_BOX. Check keys and connectivity."
+    send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Unable to SSH into $HETZNER_BOX. Check keys and connectivity."
     trap - ERR; exit 6
 fi
 
-if [[ ! -d "$LOCAL_DIR" ]] || [[ "$LOCAL_DIR" != */ ]]; then 
-    send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "FATAL: LOCAL_DIR must exist and end with a trailing slash ('/')."
+if [[ ! -d "$LOCAL_DIR" ]] || [[ "$LOCAL_DIR" != */ ]]; then
+    send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: LOCAL_DIR must exist and end with a trailing slash ('/')."
     trap - ERR; exit 2
 fi
 
@@ -195,7 +185,7 @@ if [[ "${1:-}" == "--verbose" ]]; then
 fi
 
 if [[ "${1:-}" ]]; then
-    trap - ERR 
+    trap - ERR
     case "${1}" in
         --dry-run)
             trap - ERR
@@ -213,13 +203,13 @@ if [[ "${1:-}" ]]; then
             if [ -z "$FILE_DISCREPANCIES" ]; then
                 echo "✅ Checksum validation passed. No discrepancies found."
                 log_message "Checksum validation passed. No discrepancies found."
-                send_notification "✅ Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "default" "success" "Checksum validation passed. No discrepancies found."
+                send_notification "✅ Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Checksum validation passed. No discrepancies found."
             else
                 log_message "Backup integrity check FAILED. Found discrepancies."
                 ISSUE_LIST=$(echo "${FILE_DISCREPANCIES}" | head -n 10)
                 printf "❌ Backup integrity check FAILED. First 10 differing files:\n%s\n" "${ISSUE_LIST}"
                 printf -v FAILURE_MSG "Backup integrity check FAILED.\n\nFirst 10 differing files:\n%s\n\nCheck log for full details." "${ISSUE_LIST}"
-                send_notification "❌ Backup Integrity FAILED: ${HOSTNAME}" "x" "high" "failure" "${FAILURE_MSG}"
+                send_notification "❌ Backup Integrity FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "${FAILURE_MSG}"
             fi
             exit 0 ;;
 
@@ -229,7 +219,7 @@ if [[ "${1:-}" ]]; then
             MISMATCH_COUNT=$(run_integrity_check | wc -l)
             printf "🚨 Total files with checksum mismatches: %d\n" "$MISMATCH_COUNT"
             log_message "Summary mode check found $MISMATCH_COUNT mismatched files."
-            send_notification "📊 Backup Summary: ${HOSTNAME}" "bar_chart" "default" "success" "Mismatched files found: $MISMATCH_COUNT"
+            send_notification "📊 Backup Summary: ${HOSTNAME}" "bar_chart" "${NTFY_PRIORITY_SUCCESS}" "success" "Mismatched files found: $MISMATCH_COUNT"
             exit 0 ;;
     esac
 fi
@@ -266,23 +256,23 @@ DURATION=$((END_TIME - START_TIME))
 cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"
 RSYNC_OUTPUT=$(<"$RSYNC_LOG_TMP")
 
-trap - ERR 
+trap - ERR
 
 case $RSYNC_EXIT_CODE in
     0)
         BACKUP_STATS=$(format_backup_stats "$RSYNC_OUTPUT")
         SUCCESS_MSG=$(printf "%s\n\nDuration: %dm %ds" "$BACKUP_STATS" $((DURATION / 60)) $((DURATION % 60)))
         log_message "SUCCESS: rsync completed."
-        send_notification "✅ Backup SUCCESS: ${HOSTNAME}" "white_check_mark" "default" "success" "$SUCCESS_MSG" ;;
+        send_notification "✅ Backup SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "$SUCCESS_MSG" ;;
     24)
         BACKUP_STATS=$(format_backup_stats "$RSYNC_OUTPUT")
         WARN_MSG=$(printf "rsync completed with a warning (code 24).\nSome source files vanished during transfer.\n\n%s\n\nDuration: %dm %ds" "$BACKUP_STATS" $((DURATION / 60)) $((DURATION % 60)))
         log_message "WARNING: rsync completed with code 24 (some source files vanished)."
-        send_notification "⚠️ Backup Warning: ${HOSTNAME}" "warning" "high" "warning" "$WARN_MSG" ;;
+        send_notification "⚠️ Backup Warning: ${HOSTNAME}" "warning" "${NTFY_PRIORITY_WARNING}" "warning" "$WARN_MSG" ;;
     *)
         FAIL_MSG=$(printf "rsync failed on ${HOSTNAME} with exit code ${RSYNC_EXIT_CODE}. Check log for details.\n\nDuration: %dm %ds" $((DURATION / 60)) $((DURATION % 60)))
         log_message "FAILED: rsync exited with code: $RSYNC_EXIT_CODE."
-        send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "$FAIL_MSG" ;;
+        send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$FAIL_MSG" ;;
 esac
 
 echo "======================= Run Finished =======================" >> "$LOG_FILE"
