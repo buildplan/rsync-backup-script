@@ -133,7 +133,7 @@ To run the backup automatically, edit the root crontab.
 
     ```crontab
     # Run the rsync backup every day at 3:00 AM
-    0 3 * * * /home/user/scripts/backup/backup_script.sh >/dev/null 2>&1
+    0 3 * * * /home/user/scripts/backup/backup_script.sh > /dev/null 2>&1
     ```
 
     *(Redirecting output to `/dev/null` is fine since the script handles its own logging and notifications).*
@@ -168,7 +168,8 @@ SSH_OPTS_STR="-p 23"
 
 # --- Logging ---
 LOG_FILE="/var/log/backup_rsync.log"
-LOG_RETENTION_DAYS=90 # Delete rotated logs older than this many days
+# Delete rotated logs older than this many days
+LOG_RETENTION_DAYS=90
 
 # --- Notification Toggles ---
 # Set to 'true' to enable, 'false' to disable.
