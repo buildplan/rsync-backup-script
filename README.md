@@ -158,7 +158,7 @@ Here are the complete and final versions of your two files.
 
 ```ini
 # =================================================================
-#      Unified Configuration for rsync Backup Script
+#      Configuration for rsync Backup Script
 # =================================================================
 # !! IMPORTANT !! Set file permissions to 600 (chmod 600 backup.conf)
 
@@ -218,7 +218,7 @@ END_EXCLUDES
 #!/bin/bash
 
 # =================================================================
-#           SCRIPT INITIALIZATION & SETUP
+#               SCRIPT INITIALIZATION & SETUP
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -262,8 +262,9 @@ if [ -f "$CONFIG_FILE" ]; then
             value="${BASH_REMATCH[2]}"
             # Remove surrounding quotes from value
             value="${value%\"}"; value="${value#\"}"
-            # Declare the variable in the script's scope
-            declare "$key=$value"
+            
+            ### CRITICAL SECURITY FIX: Assign value as a literal string ###
+            declare "$key"="$value"
         fi
     done < "$CONFIG_FILE"
 else
@@ -271,7 +272,7 @@ else
 fi
 
 # =================================================================
-#           SCRIPT CONFIGURATION (STATIC)
+#               SCRIPT CONFIGURATION (STATIC)
 # =================================================================
 REMOTE_TARGET="${HETZNER_BOX}:${BOX_DIR}"
 LOCK_FILE="/tmp/backup_rsync.lock"
@@ -289,7 +290,7 @@ RSYNC_BASE_OPTS=(
 
 log_message() {
     local message="$1"
-    echo "[$HOSTNAME] [$(date '+%Y-%m-%d %H:%M:%S')] $message" >> "$LOG_FILE"
+    echo "[$HOSTNAME] [$(date '+%Y-%m-%d %H:%M:%S')] $message" >> "${LOG_FILE:-/dev/null}"
     if [[ "${VERBOSE_MODE:-false}" == "true" ]]; then
         echo "$message"
     fi
@@ -298,7 +299,7 @@ log_message() {
 send_ntfy() {
     local title="$1" tags="$2" priority="$3" message="$4"
     if [[ "${NTFY_ENABLED:-false}" != "true" ]] || [ -z "${NTFY_TOKEN:-}" ] || [ -z "${NTFY_URL:-}" ]; then return; fi
-    curl -s --max-time 15 -u ":$NTFY_TOKEN" -H "Title: $title" -H "Tags: $tags" -H "Priority: $priority" -d "$message" "$NTFY_URL" > /dev/null 2>> "$LOG_FILE"
+    curl -s --max-time 15 -u ":$NTFY_TOKEN" -H "Title: $title" -H "Tags: $tags" -H "Priority: $priority" -d "$message" "$NTFY_URL" > /dev/null 2>> "${LOG_FILE:-/dev/null}"
 }
 
 send_discord() {
@@ -308,12 +309,12 @@ send_discord() {
         success) color=3066993 ;;  # Green
         warning) color=16776960 ;; # Yellow
         failure) color=15158332 ;; # Red
-        *)      color=9807270 ;;   # Grey
+        *)       color=9807270 ;;   # Grey
     esac
     local escaped_message; escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload; printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
         "$title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-    curl -s --max-time 15 -H "Content-Type: application/json" -d "$json_payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>> "$LOG_FILE"
+    curl -s --max-time 15 -H "Content-Type: application/json" -d "$json_payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>> "${LOG_FILE:-/dev/null}"
 }
 
 send_notification() {
@@ -324,7 +325,7 @@ send_notification() {
 
 run_integrity_check() {
     local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
-    LC_ALL=C rsync "${rsync_check_opts[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>> "$LOG_FILE"
+    LC_ALL=C rsync "${rsync_check_opts[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>> "${LOG_FILE:-/dev/null}"
 }
 
 format_backup_stats() {
@@ -334,10 +335,12 @@ format_backup_stats() {
     local files_created=""
     local files_deleted=""
 
+    # First, try parsing the machine-readable format from --info=stats2
     bytes_transferred=$(echo "$rsync_output" | grep 'Total_transferred_size:' | awk '{print $2}')
     files_created=$(echo "$rsync_output" | grep 'Number_of_created_files:' | awk '{print $2}')
     files_deleted=$(echo "$rsync_output" | grep 'Number_of_deleted_files:' | awk '{print $2}')
 
+    # If parsing failed, fall back to the human-readable --stats format
     if [[ -z "$bytes_transferred" && -z "$files_created" && -z "$files_deleted" ]]; then
         bytes_transferred=$(echo "$rsync_output" | grep 'Total transferred file size:' | awk '{gsub(/,/, ""); print $5}')
         files_created=$(echo "$rsync_output" | grep 'Number of created files:' | awk '{print $5}')
@@ -359,11 +362,11 @@ cleanup() {
 }
 
 # =================================================================
-#           PRE-FLIGHT CHECKS & SETUP
+#               PRE-FLIGHT CHECKS & SETUP
 # =================================================================
 
 trap cleanup EXIT
-trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "high" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE}"' ERR
+trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "high" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
 REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp)
 for cmd in "${REQUIRED_CMDS[@]}"; do
@@ -377,10 +380,14 @@ if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 
     trap - ERR; exit 6
 fi
 
-if [[ "$LOCAL_DIR" != */ ]]; then send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "FATAL: LOCAL_DIR must end with a trailing slash ('/')"; trap - ERR; exit 2; fi
+if [[ ! -d "$LOCAL_DIR" ]] || [[ "$LOCAL_DIR" != */ ]]; then 
+    send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "high" "failure" "FATAL: LOCAL_DIR must exist and end with a trailing slash ('/')."
+    trap - ERR; exit 2
+fi
+
 
 # =================================================================
-#                   SCRIPT EXECUTION
+#                       SCRIPT EXECUTION
 # =================================================================
 
 HOSTNAME=$(hostname -s)
@@ -400,9 +407,7 @@ if [[ "${1:-}" ]]; then
                 echo "❌ Dry run FAILED. See the rsync error message above for details."
                 exit 1
             fi
-            echo "--- DRY RUN COMPLETED ---"
-            exit 0
-            ;;
+            echo "--- DRY RUN COMPLETED ---"; exit 0 ;;
         --checksum)
             echo "--- INTEGRITY CHECK MODE ACTIVATED ---"
             echo "Comparing checksums... this may take a while."
@@ -418,6 +423,7 @@ if [[ "${1:-}" ]]; then
                 send_notification "❌ Backup Integrity FAILED: ${HOSTNAME}" "x" "high" "failure" "${FAILURE_MSG}"
             fi
             exit 0 ;;
+
         --summary)
             echo "--- INTEGRITY SUMMARY MODE ---"
             echo "Calculating differences..."
