@@ -265,6 +265,7 @@ else
     echo "FATAL: Unified configuration file backup.conf not found." >&2; exit 1
 fi
 
+# --- Validate that all required configuration variables are set ---
 for var in LOCAL_DIR BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE; do
     if [ -z "${!var:-}" ]; then
         echo "FATAL: Required config variable '$var' is missing or empty in $CONFIG_FILE." >&2
@@ -329,24 +330,32 @@ run_integrity_check() {
     LC_ALL=C rsync "${rsync_check_opts[@]}" "$LOCAL_DIR" "$REMOTE_TARGET" 2>> "${LOG_FILE:-/dev/null}"
 }
 
+# This runs the pipeline in a subshell with 'pipefail' disabled to prevent script crashes.
+parse_stat() {
+    local output="$1"
+    local pattern="$2"
+    local awk_command="$3"
+    (
+        set +o pipefail
+        echo "$output" | grep "$pattern" | awk "$awk_command"
+    )
+}
+
 format_backup_stats() {
     local rsync_output="$1"
-    local stats_summary=""
-    local bytes_transferred=""
-    local files_created=""
-    local files_deleted=""
-
-    bytes_transferred=$(echo "$rsync_output" | grep 'Total_transferred_size:' || true | awk '{print $2}')
-    files_created=$(echo "$rsync_output" | grep 'Number_of_created_files:' || true | awk '{print $2}')
-    files_deleted=$(echo "$rsync_output" | grep 'Number_of_deleted_files:' || true | awk '{print $2}')
+    
+    local bytes_transferred=$(parse_stat "$rsync_output" 'Total_transferred_size:' '{print $2}')
+    local files_created=$(parse_stat "$rsync_output" 'Number_of_created_files:' '{print $2}')
+    local files_deleted=$(parse_stat "$rsync_output" 'Number_of_deleted_files:' '{print $2}')
 
     # Fallback for older rsync versions
     if [[ -z "$bytes_transferred" && -z "$files_created" && -z "$files_deleted" ]]; then
-        bytes_transferred=$(echo "$rsync_output" | grep 'Total transferred file size:' || true | awk '{gsub(/,/, ""); print $5}')
-        files_created=$(echo "$rsync_output" | grep 'Number of created files:' || true | awk '{print $5}')
-        files_deleted=$(echo "$rsync_output" | grep 'Number of deleted files:' || true | awk '{print $5}')
+        bytes_transferred=$(parse_stat "$rsync_output" 'Total transferred file size:' '{gsub(/,/, ""); print $5}')
+        files_created=$(parse_stat "$rsync_output" 'Number of created files:' '{print $5}')
+        files_deleted=$(parse_stat "$rsync_output" 'Number of deleted files:' '{print $5}')
     fi
 
+    local stats_summary=""
     if [[ "${bytes_transferred:-0}" -gt 0 ]]; then
         stats_summary=$(printf "Data Transferred: %s" "$(numfmt --to=iec-i --suffix=B --format="%.2f" "$bytes_transferred")")
     else
