@@ -25,10 +25,10 @@ This script is for automating backups of a local directory to a remote server (l
 
     ```sh
     # 1. Get the script and make it executable
-    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/v0.4/backup_script.sh && chmod +x backup_script.sh
+    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup_script.sh && chmod +x backup_script.sh
 
     # 2. Get the new unified config file and set secure permissions
-    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/v0.4/backup.conf && chmod 600 backup.conf
+    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup.conf && chmod 600 backup.conf
     ```
 
   - **Run Silently**: `sudo ./backup_script.sh` (for cron)
