@@ -33,7 +33,7 @@ if [ -f "$CONFIG_FILE" ]; then
         fi
 
         if $in_exclude_block; then
-            [[ ! "$line" =~ ^\s*#|^\s*$ ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
+            [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
             continue
         fi
 
