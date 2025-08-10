@@ -235,7 +235,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-# ===================== v0.18 - 2025.08.10 ========================
+# ===================== v0.19 - 2025.08.10 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -269,14 +269,26 @@ if [ -f "$CONFIG_FILE" ]; then
         fi
 
         if $in_exclude_block; then
+            # Append non-empty, non-comment lines to the temp exclude file
             [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
             continue
         fi
-
+        
         if [[ "$line" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.*) ]]; then
             key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
             value="${value%\"}"; value="${value#\"}"
-            declare "$key"="$value"
+
+            # Whitelist allowed variables to prevent overwriting critical env vars
+            case "$key" in
+                BACKUP_DIRS|BOX_DIR|HETZNER_BOX|SSH_OPTS_STR|LOG_FILE|LOG_RETENTION_DAYS|\
+                NTFY_ENABLED|DISCORD_ENABLED|NTFY_TOKEN|NTFY_URL|DISCORD_WEBHOOK_URL|\
+                NTFY_PRIORITY_SUCCESS|NTFY_PRIORITY_WARNING|NTFY_PRIORITY_FAILURE)
+                    declare "$key"="$value"
+                    ;;
+                *)
+                    echo "WARNING: Unknown config variable '$key' ignored in $CONFIG_FILE" >&2
+                    ;;
+            esac
         fi
     done < "$CONFIG_FILE"
 else
@@ -392,8 +404,22 @@ run_preflight_checks() {
             local err_msg="A directory in BACKUP_DIRS ('$dir') must exist and end with a trailing slash ('/')."
             if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
         fi
+        if [[ ! -r "$dir" ]]; then
+            local err_msg="A directory in BACKUP_DIRS ('$dir') is not readable."
+            if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
+        fi
     done
     if [[ "$test_mode" == "true" ]]; then echo "✅ All backup directories are valid."; fi
+    if [[ "$test_mode" == "true" ]]; then echo "--- Checking local disk space..."; fi
+    local required_space_kb=102400 # 100MB in KB
+    local available_space_kb
+    available_space_kb=$(df --output=avail "$(dirname "${LOG_FILE}")" | tail -n1)
+    if [[ "$available_space_kb" -lt "$required_space_kb" ]]; then
+        local err_msg="Insufficient disk space in $(dirname "${LOG_FILE}") to guarantee logging. ($((available_space_kb / 1024))MB available)"
+        if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi
+        exit 7
+    fi
+    if [[ "$test_mode" == "true" ]]; then echo "✅ Local disk space OK."; fi
 }
 
 trap cleanup EXIT
