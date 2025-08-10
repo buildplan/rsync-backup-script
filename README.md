@@ -380,7 +380,6 @@ cleanup() {
 run_preflight_checks() {
     local test_mode=${1:-false}; local check_failed=false
 
-    # 1. Check for required commands
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking required commands..."; fi
     for cmd in "${REQUIRED_CMDS[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then echo "❌ FATAL: Required command '$cmd' not found." >&2; check_failed=true; fi
@@ -388,7 +387,6 @@ run_preflight_checks() {
     if [[ "$check_failed" == "true" ]]; then exit 10; fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ All required commands are present."; fi
 
-    # 2. Check SSH connectivity
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking SSH connectivity..."; fi
     if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
         local err_msg="Unable to SSH into $HETZNER_BOX. Check keys and connectivity."
@@ -396,7 +394,6 @@ run_preflight_checks() {
     fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
 
-    # 3. Check backup directories
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking backup directories..."; fi
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
     for dir in "${DIRS_ARRAY[@]}"; do
@@ -405,7 +402,6 @@ run_preflight_checks() {
             if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
         fi
 
-        ### ADDED: Directory readability check ###
         if [[ ! -r "$dir" ]]; then
             local err_msg="A directory in BACKUP_DIRS ('$dir') is not readable."
             if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
@@ -413,7 +409,6 @@ run_preflight_checks() {
     done
     if [[ "$test_mode" == "true" ]]; then echo "✅ All backup directories are valid."; fi
 
-    ### ADDED: Local disk space check ###
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking local disk space..."; fi
     local required_space_kb=102400 # 100MB in KB
     local available_space_kb
