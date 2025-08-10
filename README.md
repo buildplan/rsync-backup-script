@@ -31,6 +31,18 @@ This script is for automating backups of a local directory to a remote server (l
     wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup.conf && chmod 600 backup.conf
     ```
 
+#### Verify Script Integrity (Recommended)
+
+  - To ensure the script is authentic, verify its SHA256 checksum.
+
+    ```sh
+    # Download the official checksum file
+    wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup_script.sh.sha256
+
+    # Run the check (it should output: container-monitor.sh: OK)
+    sha256sum -c backup_script.sh.sha256
+    ```
+
   - **Run Silently**: `sudo ./backup_script.sh` (for cron)
   - **Run with Live Progress**: `sudo ./backup_script.sh --verbose`
   - **Dry Run**: `sudo ./backup_script.sh --dry-run` (see what would change without doing anything)
@@ -223,7 +235,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-# ===================== v0.17 - 2025.08.10 ========================
+# ===================== v0.18 - 2025.08.10 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
