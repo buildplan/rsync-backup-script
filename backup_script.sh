@@ -37,7 +37,6 @@ if [ -f "$CONFIG_FILE" ]; then
             continue
         fi
 
-        ### FIXED: Using [[:space:]] for better portability ###
         if [[ "$line" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.*) ]]; then
             key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
             value="${value%\"}"; value="${value#\"}"
@@ -126,7 +125,7 @@ format_backup_stats() {
     fi
     local stats_summary=""
     if [[ "${bytes_transferred:-0}" -gt 0 ]]; then
-        stats_summary=$(printf "Data Transferred: %s" "$(numfmt --to=iec-i --suffix=B --format="%.2f" "$bytes_transferred")")
+        stats_summary=$(printf "Data Transferred: %s" "$(numfmt --to=iec-i --suf=B --format="%.2f" "$bytes_transferred")")
     else
         stats_summary="Data Transferred: 0 B (No changes)"
     fi
@@ -177,7 +176,6 @@ fi
 
 if [[ "${1:-}" ]]; then
     case "${1}" in
-        ### FIXED: Dry-run now has full parity with the main backup operation ###
         --dry-run)
             trap - ERR
             echo "--- DRY RUN MODE ACTIVATED ---"
