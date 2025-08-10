@@ -349,7 +349,7 @@ format_backup_stats() {
     fi
     local stats_summary=""
     if [[ "${bytes_transferred:-0}" -gt 0 ]]; then
-        stats_summary=$(printf "Data Transferred: %s" "$(numfmt --to=iec-i --suf=B --format="%.2f" "$bytes_transferred")")
+        stats_summary=$(printf "Data Transferred: %s" "$(numfmt --to=iec-i --suffix=B --format="%.2f" "$bytes_transferred")")
     else
         stats_summary="Data Transferred: 0 B (No changes)"
     fi
@@ -408,14 +408,13 @@ if [[ "${1:-}" ]]; then
             read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
             for dir in "${DIRS_ARRAY[@]}"; do
                 echo -e "\n--- Checking dry run for: $dir ---"
-                # Use --itemize-changes for a visual preview of changed files
-                rsync_dry_opts=( "${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --info=stats2,name )
+                rsync_dry_opts=( "${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --out-format="%i %n%L" --info=stats2,name,flist2 )
                 DRY_RUN_LOG_TMP=$(mktemp)
                 if ! rsync "${rsync_dry_opts[@]}" "$dir" "$REMOTE_TARGET" > "$DRY_RUN_LOG_TMP" 2>&1; then
                     DRY_RUN_FAILED=true
                 fi
                 echo "---- Preview of changes (first 20) ----"
-                grep '^[*<>]' "$DRY_RUN_LOG_TMP" | head -n 20 || true
+                grep -E '^\*deleting|^[<>ch\.]f|^cd|^\.d' "$DRY_RUN_LOG_TMP" | head -n 20 || true
                 echo "-------------------------------------"
                 full_dry_run_output+=$'\n'"$(<"$DRY_RUN_LOG_TMP")"
                 rm -f "$DRY_RUN_LOG_TMP"
