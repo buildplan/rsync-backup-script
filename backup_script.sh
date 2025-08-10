@@ -66,7 +66,7 @@ LOCK_FILE="/tmp/backup_rsync.lock"
 MAX_LOG_SIZE=10485760 # 10 MB in bytes
 
 RSYNC_BASE_OPTS=(
-    -a -z --delete --partial --timeout=60
+    -aR -z --delete --partial --timeout=60
     --exclude-from="$EXCLUDE_FILE_TMP"
     -e "ssh ${SSH_OPTS_STR:-}"
 )
