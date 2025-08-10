@@ -213,7 +213,6 @@ REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep prin
 #                       SCRIPT EXECUTION
 # =================================================================
 
-HOSTNAME=$(hostname -s)
 VERBOSE_MODE=false
 if [[ "${1:-}" == "--verbose" ]]; then
     VERBOSE_MODE=true; shift
