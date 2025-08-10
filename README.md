@@ -156,8 +156,12 @@ To run the backup automatically, edit the root crontab.
 
 # --- Source and Destination ---
 # List all source directories to back up, separated by spaces.
-# IMPORTANT: Each path MUST end with a trailing slash!
-BACKUP_DIRS="/home/user/ /usr/scripts/ /etc/apps/"
+#
+# IMPORTANT: Follow these two rules for each path:
+# 1. End the path with a trailing slash (e.g., "user/").
+# 2. Use "/./" to mark the part of the path you want to create on the destination.
+#    Example: "/home/./user/" will create a "user" directory in your BOX_DIR.
+BACKUP_DIRS="/home/./user/ /var/./log/ /etc/./nginx/"
 BOX_DIR="/home/myvps/"
 
 # --- Connection Details ---
@@ -222,7 +226,7 @@ END_EXCLUDES
 
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
-#                      v0.15 - 2025.08.10
+#                      v0.16 - 2025.08.10
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -286,7 +290,7 @@ LOCK_FILE="/tmp/backup_rsync.lock"
 MAX_LOG_SIZE=10485760 # 10 MB in bytes
 
 RSYNC_BASE_OPTS=(
-    -a -z --delete --partial --timeout=60
+    -aR -z --delete --partial --timeout=60
     --exclude-from="$EXCLUDE_FILE_TMP"
     -e "ssh ${SSH_OPTS_STR:-}"
 )
@@ -331,7 +335,7 @@ send_notification() {
 }
 
 run_integrity_check() {
-    local rsync_check_opts=(-ainc -c --delete --mkpath --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
+    local rsync_check_opts=(-aincR -c --delete --mkpath --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
 
     for dir in $BACKUP_DIRS; do
         local remote_path="${REMOTE_TARGET}${dir#/}"
@@ -441,22 +445,40 @@ fi
 if [[ "${1:-}" ]]; then
     trap - ERR
     case "${1}" in
+    
         --dry-run)
             trap - ERR
             echo "--- DRY RUN MODE ACTIVATED ---"
             DRY_RUN_FAILED=false
-            for dir in $BACKUP_DIRS; do
-                remote_path="${REMOTE_TARGET}${dir#/}"
-                echo "--- Checking dry run for: $dir -> $remote_path"
-                # shellcheck disable=SC2086
-                if ! rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 "$dir" "$remote_path"; then
+            full_dry_run_output=""
+
+            read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
+            for dir in "${DIRS_ARRAY[@]}"; do
+                echo -e "\n--- Checking dry run for: $dir ---"
+
+                rsync_dry_opts=("${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --info=stats2)
+                
+                DRY_RUN_LOG_TMP=$(mktemp)
+                
+                if ! rsync "${rsync_dry_opts[@]}" "$dir" "$REMOTE_TARGET" > "$DRY_RUN_LOG_TMP" 2>&1; then
                     DRY_RUN_FAILED=true
                 fi
+
+                echo "---- Preview of changes ----"
+                grep '^[*<>]' "$DRY_RUN_LOG_TMP" | head -n 20 || true
+                echo "----------------------------"
+                
+                full_dry_run_output+=$'\n'"$(<"$DRY_RUN_LOG_TMP")"
+                rm -f "$DRY_RUN_LOG_TMP"
             done
 
+            echo -e "\n--- Overall Dry Run Summary ---"
+            BACKUP_STATS=$(format_backup_stats "$full_dry_run_output")
+            echo -e "$BACKUP_STATS"
+            echo "-------------------------------"
+
             if [[ "$DRY_RUN_FAILED" == "true" ]]; then
-                 echo ""
-                 echo "❌ Dry run FAILED for one or more directories. See the rsync error messages above for details."
+                 echo -e "\n❌ Dry run FAILED for one or more directories. See rsync errors above."
                  exit 1
             fi
             echo "--- DRY RUN COMPLETED ---"; exit 0 ;;
