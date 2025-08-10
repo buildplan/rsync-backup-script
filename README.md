@@ -222,7 +222,7 @@ END_EXCLUDES
 
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
-#                      v0.13 - 2025.08.10
+#                      v0.14 - 2025.08.10
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -286,7 +286,7 @@ LOCK_FILE="/tmp/backup_rsync.lock"
 MAX_LOG_SIZE=10485760 # 10 MB in bytes
 
 RSYNC_BASE_OPTS=(
-    -a -z --delete --partial --timeout=60
+    -aR -z --delete --partial --timeout=60
     --exclude-from="$EXCLUDE_FILE_TMP"
     -e "ssh ${SSH_OPTS_STR:-}"
 )
@@ -331,7 +331,7 @@ send_notification() {
 }
 
 run_integrity_check() {
-    local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
+    local rsync_check_opts=(-aincR -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
 
     for dir in $BACKUP_DIRS; do
         local remote_path="${REMOTE_TARGET}${dir#/}"
