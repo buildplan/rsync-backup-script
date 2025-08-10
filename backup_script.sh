@@ -31,16 +31,21 @@ if [ -f "$CONFIG_FILE" ]; then
         elif [[ "$line" == "END_EXCLUDES" ]]; then
             in_exclude_block=false; continue
         fi
-
-        if $in_exclude_block; then
-            [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
-            continue
-        fi
-
         if [[ "$line" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.*) ]]; then
             key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
             value="${value%\"}"; value="${value#\"}"
-            declare "$key"="$value"
+
+            # Whitelist allowed variables to prevent overwriting critical env vars
+            case "$key" in
+                BACKUP_DIRS|BOX_DIR|HETZNER_BOX|SSH_OPTS_STR|LOG_FILE|LOG_RETENTION_DAYS|\
+                NTFY_ENABLED|DISCORD_ENABLED|NTFY_TOKEN|NTFY_URL|DISCORD_WEBHOOK_URL|\
+                NTFY_PRIORITY_SUCCESS|NTFY_PRIORITY_WARNING|NTFY_PRIORITY_FAILURE)
+                    declare "$key"="$value"
+                    ;;
+                *)
+                    echo "WARNING: Unknown config variable '$key' ignored in $CONFIG_FILE" >&2
+                    ;;
+            esac
         fi
     done < "$CONFIG_FILE"
 else
@@ -135,20 +140,27 @@ format_backup_stats() {
 cleanup() {
     rm -f "${EXCLUDE_FILE_TMP:-}" "${RSYNC_LOG_TMP:-}"
 }
+
 run_preflight_checks() {
     local test_mode=${1:-false}; local check_failed=false
+
+    # 1. Check for required commands
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking required commands..."; fi
     for cmd in "${REQUIRED_CMDS[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then echo "❌ FATAL: Required command '$cmd' not found." >&2; check_failed=true; fi
     done
     if [[ "$check_failed" == "true" ]]; then exit 10; fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ All required commands are present."; fi
+
+    # 2. Check SSH connectivity
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking SSH connectivity..."; fi
     if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
         local err_msg="Unable to SSH into $HETZNER_BOX. Check keys and connectivity."
         if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
     fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
+
+    # 3. Check backup directories
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking backup directories..."; fi
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
     for dir in "${DIRS_ARRAY[@]}"; do
@@ -156,8 +168,26 @@ run_preflight_checks() {
             local err_msg="A directory in BACKUP_DIRS ('$dir') must exist and end with a trailing slash ('/')."
             if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
         fi
+
+        ### ADDED: Directory readability check ###
+        if [[ ! -r "$dir" ]]; then
+            local err_msg="A directory in BACKUP_DIRS ('$dir') is not readable."
+            if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
+        fi
     done
     if [[ "$test_mode" == "true" ]]; then echo "✅ All backup directories are valid."; fi
+
+    ### ADDED: Local disk space check ###
+    if [[ "$test_mode" == "true" ]]; then echo "--- Checking local disk space..."; fi
+    local required_space_kb=102400 # 100MB in KB
+    local available_space_kb
+    available_space_kb=$(df --output=avail "$(dirname "${LOG_FILE}")" | tail -n1)
+    if [[ "$available_space_kb" -lt "$required_space_kb" ]]; then
+        local err_msg="Insufficient disk space in $(dirname "${LOG_FILE}") to guarantee logging. ($((available_space_kb / 1024))MB available)"
+        if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi
+        exit 7
+    fi
+    if [[ "$test_mode" == "true" ]]; then echo "✅ Local disk space OK."; fi
 }
 
 trap cleanup EXIT
