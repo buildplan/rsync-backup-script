@@ -2,7 +2,7 @@
 
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
-#                      v0.13 - 2025.08.10
+#                      v0.14 - 2025.08.10
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -111,7 +111,7 @@ send_notification() {
 }
 
 run_integrity_check() {
-    local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
+    local rsync_check_opts=(-aincR -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
 
     for dir in $BACKUP_DIRS; do
         local remote_path="${REMOTE_TARGET}${dir#/}"
