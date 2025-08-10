@@ -184,7 +184,7 @@ if [[ "${1:-}" ]]; then
             read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
             for dir in "${DIRS_ARRAY[@]}"; do
                 echo -e "\n--- Checking dry run for: $dir ---"
-                rsync_dry_opts=( "${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --info=stats2,name )
+                rsync_dry_opts=( "${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --out-format="%i %n%L" --info=stats2,name,flist2 )
                 DRY_RUN_LOG_TMP=$(mktemp)
                 if ! rsync "${rsync_dry_opts[@]}" "$dir" "$REMOTE_TARGET" > "$DRY_RUN_LOG_TMP" 2>&1; then
                     DRY_RUN_FAILED=true
