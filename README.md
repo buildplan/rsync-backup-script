@@ -39,7 +39,7 @@ This script is for automating backups of a local directory to a remote server (l
     # Download the official checksum file
     wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup_script.sh.sha256
 
-    # Run the check (it should output: container-monitor.sh: OK)
+    # Run the check (it should output: backup_script.sh: OK)
     sha256sum -c backup_script.sh.sha256
     ```
 
