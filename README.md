@@ -222,7 +222,7 @@ END_EXCLUDES
 
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
-#                      v0.11 - 2025.08.09
+#                      v0.12 - 2025.08.10
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -332,9 +332,12 @@ run_integrity_check() {
     local rsync_check_opts=(-ainc -c --delete --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
 
     for dir in $BACKUP_DIRS; do
-        local remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
+        local remote_path="${REMOTE_TARGET}${dir#/}"
+
+        echo "--- Integrity Check: $dir ---" >&2
+
         # shellcheck disable=SC2086
-        LC_ALL=C rsync "${rsync_check_opts[@]}" "$dir" "$remote_subdir" 2>> "${LOG_FILE:-/dev/null}"
+        LC_ALL=C rsync "${rsync_check_opts[@]}" "$dir" "$remote_path" 2>> "${LOG_FILE:-/dev/null}"
     done
 }
 
@@ -355,7 +358,6 @@ format_backup_stats() {
     local files_created=$(parse_stat "$rsync_output" 'Number_of_created_files:' '{s+=$2} END {print s}')
     local files_deleted=$(parse_stat "$rsync_output" 'Number_of_deleted_files:' '{s+=$2} END {print s}')
 
-    # Fallback for older rsync versions
     if [[ -z "$bytes_transferred" && -z "$files_created" && -z "$files_deleted" ]]; then
         bytes_transferred=$(parse_stat "$rsync_output" 'Total transferred file size:' '{gsub(/,/, ""); s+=$5} END {print s}')
         files_created=$(parse_stat "$rsync_output" 'Number of created files:' '{s+=$5} END {print s}')
@@ -422,10 +424,10 @@ if [[ "${1:-}" ]]; then
             echo "--- DRY RUN MODE ACTIVATED ---"
             DRY_RUN_FAILED=false
             for dir in $BACKUP_DIRS; do
-                remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
-                echo "--- Checking dry run for: $dir -> $remote_subdir"
+                remote_path="${REMOTE_TARGET}${dir#/}"
+                echo "--- Checking dry run for: $dir -> $remote_path"
                 # shellcheck disable=SC2086
-                if ! rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 "$dir" "$remote_subdir"; then
+                if ! rsync "${RSYNC_BASE_OPTS[@]}" --dry-run --info=progress2 "$dir" "$remote_path"; then
                     DRY_RUN_FAILED=true
                 fi
             done
@@ -440,23 +442,28 @@ if [[ "${1:-}" ]]; then
         --checksum | --summary)
             echo "--- INTEGRITY CHECK MODE ACTIVATED ---"
             echo "Calculating differences..."
+            START_TIME_INTEGRITY=$(date +%s)
             FILE_DISCREPANCIES=$(run_integrity_check)
+            END_TIME_INTEGRITY=$(date +%s)
+            DURATION_INTEGRITY=$((END_TIME_INTEGRITY - START_TIME_INTEGRITY))
+
+            CLEAN_DISCREPANCIES=$(echo "$FILE_DISCREPANCIES" | grep -v '^\*')
 
             if [[ "$1" == "--summary" ]]; then
-                MISMATCH_COUNT=$(echo "$FILE_DISCREPANCIES" | wc -l)
+                MISMATCH_COUNT=$(echo "$CLEAN_DISCREPANCIES" | wc -l)
                 printf "🚨 Total files with checksum mismatches: %d\n" "$MISMATCH_COUNT"
                 log_message "Summary mode check found $MISMATCH_COUNT mismatched files."
                 send_notification "📊 Backup Summary: ${HOSTNAME}" "bar_chart" "${NTFY_PRIORITY_SUCCESS}" "success" "Mismatched files found: $MISMATCH_COUNT"
             else # --checksum
-                if [ -z "$FILE_DISCREPANCIES" ]; then
+                if [ -z "$CLEAN_DISCREPANCIES" ]; then
                     echo "✅ Checksum validation passed. No discrepancies found."
                     log_message "Checksum validation passed. No discrepancies found."
                     send_notification "✅ Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Checksum validation passed. No discrepancies found."
                 else
                     log_message "Backup integrity check FAILED. Found discrepancies."
-                    ISSUE_LIST=$(echo "${FILE_DISCREPANCIES}" | head -n 10)
-                    printf "❌ Backup integrity check FAILED. First 10 differing files:\n%s\n" "${ISSUE_LIST}"
-                    printf -v FAILURE_MSG "Backup integrity check FAILED.\n\nFirst 10 differing files:\n%s\n\nCheck log for full details." "${ISSUE_LIST}"
+                    ISSUE_LIST=$(echo "$CLEAN_DISCREPANCIES" | head -n 10)
+                    printf -v FAILURE_MSG "Backup integrity check FAILED.\n\nFirst 10 differing files:\n%s\n\nCheck duration: %dm %ds" "${ISSUE_LIST}" $((DURATION_INTEGRITY / 60)) $((DURATION_INTEGRITY % 60))
+                    printf "❌ %s\n" "$FAILURE_MSG"
                     send_notification "❌ Backup Integrity FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "${FAILURE_MSG}"
                 fi
             fi
@@ -486,7 +493,7 @@ full_rsync_output=""
 for dir in $BACKUP_DIRS; do
     log_message "Backing up directory: $dir"
 
-    remote_subdir="${REMOTE_TARGET}/$(basename "$dir")/"
+    remote_path="${REMOTE_TARGET}${dir#/}"
 
     RSYNC_LOG_TMP=$(mktemp)
     RSYNC_EXIT_CODE=0
@@ -495,12 +502,12 @@ for dir in $BACKUP_DIRS; do
     if [[ "$VERBOSE_MODE" == "true" ]]; then
         RSYNC_OPTS+=(--info=stats2,progress2)
         # shellcheck disable=SC2086
-        nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$remote_subdir" 2>&1 | tee "$RSYNC_LOG_TMP"
+        nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$remote_path" 2>&1 | tee "$RSYNC_LOG_TMP"
         RSYNC_EXIT_CODE=${PIPESTATUS[0]}
     else
         RSYNC_OPTS+=(--info=stats2)
         # shellcheck disable=SC2086
-        nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$remote_subdir" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
+        nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$remote_path" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
     fi
 
     cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"
