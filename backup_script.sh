@@ -266,7 +266,10 @@ run_recycle_bin_cleanup() {
         return 0
     }
     if [[ -n "$deleted" ]]; then
-        log_message "Removed old recycle bin folders:\n${deleted}"
+        log_message "Removed old recycle bin folders:"
+        while IFS= read -r folder; do
+            log_message "  $folder"
+        done <<< "$deleted"
     else
         log_message "No old recycle bin folders to remove."
     fi
