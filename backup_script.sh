@@ -390,10 +390,12 @@ for dir in "${DIRS_ARRAY[@]}"; do
     fi
     if [[ "$VERBOSE_MODE" == "true" ]]; then
         RSYNC_OPTS+=(--info=stats2,progress2)
+        log_message "DEBUG: rsync options being used: ${RSYNC_OPTS[*]}"
         nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$REMOTE_TARGET" 2>&1 | tee "$RSYNC_LOG_TMP"
         RSYNC_EXIT_CODE=${PIPESTATUS[0]}
     else
         RSYNC_OPTS+=(--info=stats2)
+        log_message "DEBUG: rsync options being used: ${RSYNC_OPTS[*]}"
         nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$REMOTE_TARGET" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
     fi
     cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"; full_rsync_output+=$'\n'"$(<"$RSYNC_LOG_TMP")"
