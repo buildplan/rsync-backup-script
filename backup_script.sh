@@ -25,14 +25,16 @@ SSH_OPTS_ARRAY=()
 
 # --- Securely parse the unified configuration file ---
 if [ -f "$CONFIG_FILE" ]; then
-    in_exclude_block="false"
-    in_ssh_opts_block="false"
+    in_exclude_block=false
+    in_ssh_opts_block=false
     while IFS= read -r line; do
-        if [[ "$line" == "BEGIN_EXCLUDES" ]]; then in_exclude_block="true"; continue; fi
-        if [[ "$line" == "END_EXCLUDES" ]]; then in_exclude_block="false"; continue; fi
-        if [[ "$line" == "BEGIN_SSH_OPTS" ]]; then in_ssh_opts_block="true"; continue; fi
-        if [[ "$line" == "END_SSH_OPTS" ]]; then in_ssh_opts_block="false"; continue; fi
+        # --- Handle block markers ---
+        if [[ "$line" == "BEGIN_EXCLUDES" ]]; then in_exclude_block=true; continue; fi
+        if [[ "$line" == "END_EXCLUDES" ]]; then in_exclude_block=false; continue; fi
+        if [[ "$line" == "BEGIN_SSH_OPTS" ]]; then in_ssh_opts_block=true; continue; fi
+        if [[ "$line" == "END_SSH_OPTS" ]]; then in_ssh_opts_block=false; continue; fi
 
+        # --- Process lines within blocks ---
         if [[ "$in_exclude_block" == "true" ]]; then
             [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
             continue
@@ -42,6 +44,7 @@ if [ -f "$CONFIG_FILE" ]; then
             continue
         fi
         
+        # --- Process key-value pairs ---
         if [[ "$line" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.*) ]]; then
             key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
             value="${value%\"}"; value="${value#\"}"
@@ -87,10 +90,15 @@ REMOTE_TARGET="${HETZNER_BOX}:${BOX_DIR}"
 LOCK_FILE="/tmp/backup_rsync.lock"
 MAX_LOG_SIZE=10485760 # 10 MB in bytes
 
+SSH_CMD="ssh"
+if (( ${#SSH_OPTS_ARRAY[@]} > 0 )); then
+    SSH_CMD+=$(printf " %q" "${SSH_OPTS_ARRAY[@]}")
+fi
+
 RSYNC_BASE_OPTS=(
     -aR -z --delete --partial --timeout=60 --mkpath
     --exclude-from="$EXCLUDE_FILE_TMP"
-    -e "ssh -n ${SSH_OPTS_ARRAY[@]}"
+    -e "$SSH_CMD"
 )
 
 # =================================================================
@@ -126,7 +134,7 @@ send_notification() {
     send_discord "$title" "$discord_status" "$message"
 }
 run_integrity_check() {
-    local rsync_check_opts=(-aincR -c --delete --mkpath --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_ARRAY[@]}")
+    local rsync_check_opts=(-aincR -c --delete --mkpath --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "$SSH_CMD")
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
     for dir in "${DIRS_ARRAY[@]}"; do
         echo "--- Integrity Check: $dir ---" >&2
@@ -233,7 +241,7 @@ run_restore_mode() {
     echo "Restore destination is set to: $final_dest"
     echo ""; echo "--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---"
     log_message "Starting restore dry-run from ${full_remote_source} to ${final_dest}"
-    local rsync_restore_opts=(-avhi --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "ssh ${SSH_OPTS_ARRAY[@]}")
+    local rsync_restore_opts=(-avhi --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "$SSH_CMD")
     if ! rsync "${rsync_restore_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
         echo "❌ DRY RUN FAILED. Rsync reported an error. Aborting." >&2; return 1
     fi
@@ -308,7 +316,7 @@ run_recycle_bin_cleanup() {
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
-REQUIRED_CMDS=(rsync ssh curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename)
+REQUIRED_CMDS=(rsync ssh curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename read)
 
 # =================================================================
 #                       SCRIPT EXECUTION
