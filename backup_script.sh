@@ -269,7 +269,7 @@ run_recycle_bin_cleanup() {
     if [[ "${RECYCLE_BIN_ENABLED:-false}" != "true" ]]; then return 0; fi
     log_message "Checking remote recycle bin..."
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
-    local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes)
+    local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -n)
     local list_command="ls -1 \"$remote_cleanup_path\""
     local all_folders
     all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
