@@ -239,7 +239,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-# ===================== v0.22 - 2025.08.11 ========================
+# ===================== v0.23 - 2025.08.11 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -487,7 +487,7 @@ run_restore_mode() {
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
-REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename read)
+REQUIRED_CMDS=(rsync ssh curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename read)
 
 # =================================================================
 #                       SCRIPT EXECUTION
