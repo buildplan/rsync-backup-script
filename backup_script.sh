@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.21 - 2025.08.11 ========================
+# ===================== v0.22 - 2025.08.11 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -33,7 +33,6 @@ if [ -f "$CONFIG_FILE" ]; then
         fi
 
         if $in_exclude_block; then
-            # Append non-empty, non-comment lines to the temp exclude file
             [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
             continue
         fi
@@ -42,7 +41,6 @@ if [ -f "$CONFIG_FILE" ]; then
             key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
             value="${value%\"}"; value="${value#\"}"
 
-            # Whitelist allowed variables to prevent overwriting critical env vars
             case "$key" in
                 BACKUP_DIRS|BOX_DIR|HETZNER_BOX|SSH_OPTS_STR|LOG_FILE|LOG_RETENTION_DAYS|\
                 NTFY_ENABLED|DISCORD_ENABLED|NTFY_TOKEN|NTFY_URL|DISCORD_WEBHOOK_URL|\
@@ -146,18 +144,14 @@ format_backup_stats() {
         stats_summary="Data Transferred: 0 B (No changes)"
     fi
     stats_summary+=$(printf "\nFiles Updated: %s\nFiles Created: %s\nFiles Deleted: %s" "${files_updated:-0}" "${files_created:-0}" "${files_deleted:-0}")
-
     printf "%s\n" "$stats_summary"
 }
 cleanup() {
     rm -f "${EXCLUDE_FILE_TMP:-}" "${RSYNC_LOG_TMP:-}"
 }
 run_preflight_checks() {
-    local mode=${1:-backup} # Default to 'backup' mode
-    local test_mode=false
-    if [[ "$mode" == "test" ]]; then
-        test_mode=true
-    fi
+    local mode=${1:-backup}; local test_mode=false
+    if [[ "$mode" == "test" ]]; then test_mode=true; fi
     local check_failed=false
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking required commands..."; fi
     for cmd in "${REQUIRED_CMDS[@]}"; do
@@ -172,7 +166,6 @@ run_preflight_checks() {
     fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
     if [[ "$mode" != "restore" ]]; then
-        # 3. Check backup directories
         if [[ "$test_mode" == "true" ]]; then echo "--- Checking backup directories..."; fi
         local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
         for dir in "${DIRS_ARRAY[@]}"; do
@@ -201,79 +194,60 @@ run_preflight_checks() {
 run_restore_mode() {
     echo "--- RESTORE MODE ACTIVATED ---"
     run_preflight_checks "restore"
-    local DIRS_ARRAY
-    read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
+    local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
     echo "Available backups to restore:"
     select dir_choice in "${DIRS_ARRAY[@]}" "Cancel"; do
-        if [[ "$dir_choice" == "Cancel" ]]; then
-            echo "Restore cancelled."; return 0
-        elif [[ -n "$dir_choice" ]]; then
-            break
-        else
-            echo "Invalid selection. Please try again."; fi
+        if [[ "$dir_choice" == "Cancel" ]]; then echo "Restore cancelled."; return 0;
+        elif [[ -n "$dir_choice" ]]; then break;
+        else echo "Invalid selection. Please try again."; fi
     done
     local relative_path="${dir_choice#*./}"
     local full_remote_source="${REMOTE_TARGET}${relative_path}"
-    local default_local_dest
-    default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#')
-    local final_dest
-    read -p $'\nEnter the destination path.\nPress [Enter] to use the original location ('"$default_local_dest"$'): ' final_dest
+    local default_local_dest; default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#')
+    local final_dest; read -p $'\nEnter the destination path.\nPress [Enter] to use the original location ('"$default_local_dest"$'): ' final_dest
     : "${final_dest:=$default_local_dest}"
     local dest_created=false
-    if [[ ! -d "$final_dest" ]]; then
-        dest_created=true
-    fi
+    if [[ ! -d "$final_dest" ]]; then dest_created=true; fi
     if [[ "$final_dest" != "$default_local_dest" && -d "$final_dest" ]]; then
         local warning_msg="⚠️ WARNING: The custom destination directory '$final_dest' already exists. Files may be overwritten."
-        echo "$warning_msg"
-        log_message "$warning_msg"
+        echo "$warning_msg"; log_message "$warning_msg"
     fi
-
-    if ! mkdir -p "$final_dest"; then
-        echo "❌ FATAL: Could not create destination directory '$final_dest'. Aborting." >&2
-        return 1
-    fi
+    if ! mkdir -p "$final_dest"; then echo "❌ FATAL: Could not create destination directory '$final_dest'. Aborting." >&2; return 1; fi
     if [[ "$dest_created" == "true" ]]; then
-        chmod 700 "$final_dest"
-        log_message "Set permissions to 700 on newly created restore directory: $final_dest"
+        chmod 700 "$final_dest"; log_message "Set permissions to 700 on newly created restore directory: $final_dest"
     fi
     echo "Restore destination is set to: $final_dest"
-    echo ""
-    echo "--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---"
+    echo ""; echo "--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---"
     log_message "Starting restore dry-run from ${full_remote_source} to ${final_dest}"
     local rsync_restore_opts=(-avhi --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "ssh ${SSH_OPTS_STR:-}")
     if ! rsync "${rsync_restore_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
-        echo "❌ DRY RUN FAILED. Rsync reported an error. Aborting." >&2
-        return 1
+        echo "❌ DRY RUN FAILED. Rsync reported an error. Aborting." >&2; return 1
     fi
     echo "--- DRY RUN COMPLETE ---"
-    local confirmation
-    while true; do
+    local confirmation; while true; do
         read -p $'\nAre you sure you want to proceed with restoring files to '"$final_dest"'? [yes/no]: ' confirmation
         case "$confirmation" in
-            yes) break ;;
-            no) echo "Restore aborted by user." ; return 0 ;;
-            *) echo "Please answer yes or no." ;;
+            yes) break ;; no) echo "Restore aborted by user." ; return 0 ;; *) echo "Please answer yes or no." ;;
         esac
     done
     echo -e "\n--- PROCEEDING WITH RESTORE... ---"
     log_message "Starting REAL restore from ${full_remote_source} to ${final_dest}"
-
     if rsync "${rsync_restore_opts[@]}" "$full_remote_source" "$final_dest"; then
         log_message "Restore completed successfully."
         echo "✅ Restore of '$relative_path' to '$final_dest' completed successfully."
         send_notification "✅ Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${relative_path} to ${final_dest}"
     else
         log_message "Restore FAILED with rsync exit code $?."
-        echo "❌ Restore FAILED. Check the rsync output above and the log file for details."
+        echo "❌ Restore FAILED. Check the rsync output and log for details."
         send_notification "❌ Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${relative_path} to ${final_dest} failed."
         return 1
     fi
 }
+
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
-REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename)
+REQUIRED_CMDS=(rsync curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename read)
 
 # =================================================================
 #                       SCRIPT EXECUTION
@@ -288,30 +262,23 @@ if [[ "${1:-}" ]]; then
     case "${1}" in
         --dry-run)
             trap - ERR
-            echo "--- DRY RUN MODE ACTIVATED ---"
-            DRY_RUN_FAILED=false
-            full_dry_run_output=""
+            echo "--- DRY RUN MODE ACTIVATED ---"; DRY_RUN_FAILED=false; full_dry_run_output=""
             read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
             for dir in "${DIRS_ARRAY[@]}"; do
                 echo -e "\n--- Checking dry run for: $dir ---"
                 rsync_dry_opts=( "${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --out-format="%i %n%L" --info=stats2,name,flist2 )
                 DRY_RUN_LOG_TMP=$(mktemp)
-                if ! rsync "${rsync_dry_opts[@]}" "$dir" "$REMOTE_TARGET" > "$DRY_RUN_LOG_TMP" 2>&1; then
-                    DRY_RUN_FAILED=true
-                fi
+                if ! rsync "${rsync_dry_opts[@]}" "$dir" "$REMOTE_TARGET" > "$DRY_RUN_LOG_TMP" 2>&1; then DRY_RUN_FAILED=true; fi
                 echo "---- Preview of changes (first 20) ----"
                 grep -E '^\*deleting|^[<>ch\.]f|^cd|^\.d' "$DRY_RUN_LOG_TMP" | head -n 20 || true
                 echo "-------------------------------------"
-                full_dry_run_output+=$'\n'"$(<"$DRY_RUN_LOG_TMP")"
-                rm -f "$DRY_RUN_LOG_TMP"
+                full_dry_run_output+=$'\n'"$(<"$DRY_RUN_LOG_TMP")"; rm -f "$DRY_RUN_LOG_TMP"
             done
             echo -e "\n--- Overall Dry Run Summary ---"
             BACKUP_STATS=$(format_backup_stats "$full_dry_run_output")
-            echo -e "$BACKUP_STATS"
-            echo "-------------------------------"
+            echo -e "$BACKUP_STATS"; echo "-------------------------------"
             if [[ "$DRY_RUN_FAILED" == "true" ]]; then
-                 echo -e "\n❌ Dry run FAILED for one or more directories. See rsync errors above."
-                 exit 1
+                 echo -e "\n❌ Dry run FAILED for one or more directories. See rsync errors above."; exit 1
             fi
             echo "--- DRY RUN COMPLETED ---"; exit 0 ;;
         --checksum | --summary)
@@ -341,12 +308,10 @@ if [[ "${1:-}" ]]; then
             exit 0 ;;
         --test)
             trap - ERR
-            echo "--- TEST MODE ACTIVATED ---"; run_preflight_checks true
+            echo "--- TEST MODE ACTIVATED ---"; run_preflight_checks "test"
             echo "---------------------------"; echo "✅ All configuration checks passed."; exit 0 ;;
         --restore)
-            trap - ERR
-            run_restore_mode
-            exit 0 ;;
+            trap - ERR; run_restore_mode; exit 0 ;;
     esac
 fi
 
