@@ -235,7 +235,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-# ===================== v0.19 - 2025.08.10 ========================
+# ===================== v0.20 - 2025.08.11 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -363,21 +363,26 @@ parse_stat() {
 }
 format_backup_stats() {
     local rsync_output="$1"
+    local files_transferred=$(parse_stat "$rsync_output" 'Number of regular files transferred:' '{s+=$2} END {print s}')
     local bytes_transferred=$(parse_stat "$rsync_output" 'Total_transferred_size:' '{s+=$2} END {print s}')
     local files_created=$(parse_stat "$rsync_output" 'Number_of_created_files:' '{s+=$2} END {print s}')
     local files_deleted=$(parse_stat "$rsync_output" 'Number_of_deleted_files:' '{s+=$2} END {print s}')
     if [[ -z "$bytes_transferred" && -z "$files_created" && -z "$files_deleted" ]]; then
+        files_transferred=$(parse_stat "$rsync_output" 'Number of files transferred:' '{gsub(/,/, ""); s+=$4} END {print s}')
         bytes_transferred=$(parse_stat "$rsync_output" 'Total transferred file size:' '{gsub(/,/, ""); s+=$5} END {print s}')
         files_created=$(parse_stat "$rsync_output" 'Number of created files:' '{s+=$5} END {print s}')
         files_deleted=$(parse_stat "$rsync_output" 'Number of deleted files:' '{s+=$5} END {print s}')
     fi
+    local files_updated=$(( ${files_transferred:-0} - ${files_created:-0} ))
+    if (( files_updated < 0 )); then files_updated=0; fi
     local stats_summary=""
     if [[ "${bytes_transferred:-0}" -gt 0 ]]; then
         stats_summary=$(printf "Data Transferred: %s" "$(numfmt --to=iec-i --suffix=B --format="%.2f" "$bytes_transferred")")
     else
         stats_summary="Data Transferred: 0 B (No changes)"
     fi
-    stats_summary+=$(printf "\nFiles Created: %s\nFiles Deleted: %s" "${files_created:-0}" "${files_deleted:-0}")
+    stats_summary+=$(printf "\nFiles Updated: %s\nFiles Created: %s\nFiles Deleted: %s" "${files_updated:-0}" "${files_created:-0}" "${files_deleted:-0}")
+
     printf "%s\n" "$stats_summary"
 }
 cleanup() {
