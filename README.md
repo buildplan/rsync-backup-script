@@ -12,7 +12,7 @@ This script is for automating backups of a local directory to a remote server (l
   - **Robust Error Handling**: Uses `set -Euo pipefail` and a global `ERR` trap to catch and report any unexpected errors.
   - **Informative Reports**: Notifications include transfer size, files created, and files deleted.
   - **Production Ready**: Uses `nice` and `ionice` to limit CPU/IO impact on the server.
-  - **User-Friendly Modes**: Includes `--dry-run`, `--checksum`, `--summary`, and a `--verbose` flag for live progress on manual runs.
+  - **User-Friendly Modes**: Includes `--dry-run`, `--checksum`, `--summary`, `--verbose` and a `--restore` flag for interctive restore of the files from remote backup.
   - **Locking & Log Rotation**: Prevents concurrent runs and manages log file size automatically.
   - **Prerequisite Checks**: Verifies that all required commands and SSH connectivity are working before running.
 
