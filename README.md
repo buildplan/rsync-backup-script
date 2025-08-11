@@ -12,7 +12,7 @@ This script is for automating backups of a local directory to a remote server (l
   - **Robust Error Handling**: Uses `set -Euo pipefail` and a global `ERR` trap to catch and report any unexpected errors.
   - **Informative Reports**: Notifications include transfer size, files created, and files deleted.
   - **Production Ready**: Uses `nice` and `ionice` to limit CPU/IO impact on the server.
-  - **User-Friendly Modes**: Includes `--dry-run`, `--checksum`, `--summary`, and a `--verbose` flag for live progress on manual runs.
+  - **User-Friendly Modes**: Includes `--dry-run`, `--checksum`, `--summary`, `--verbose` and a `--restore` flag for interctive restore of the files from remote backup.
   - **Locking & Log Rotation**: Prevents concurrent runs and manages log file size automatically.
   - **Prerequisite Checks**: Verifies that all required commands and SSH connectivity are working before running.
 
@@ -48,6 +48,7 @@ This script is for automating backups of a local directory to a remote server (l
   - **Dry Run**: `sudo ./backup_script.sh --dry-run` (see what would change without doing anything)
   - **Check Integrity**: `sudo ./backup_script.sh --checksum` (Compares local and remote files using checksums; can be slow but is very thorough).
   - **Get Mismatch Count**: `sudo ./backup_script.sh --summary` (Quickly reports the number of files that differ between local and remote).
+  - **Restore from remote backup**: `sudo ./backup_script.sh --restore` (Interactive restore with mandatory dry-run and confirmation; restore to original or custom path, respects SSH options and excludes.)
 
 *The log file is located at `/var/log/backup_rsync.log` by default.*
 
@@ -235,7 +236,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-# ===================== v0.20 - 2025.08.11 ========================
+# ===================== v0.21 - 2025.08.11 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -389,7 +390,12 @@ cleanup() {
     rm -f "${EXCLUDE_FILE_TMP:-}" "${RSYNC_LOG_TMP:-}"
 }
 run_preflight_checks() {
-    local test_mode=${1:-false}; local check_failed=false
+    local mode=${1:-backup} # Default to 'backup' mode
+    local test_mode=false
+    if [[ "$mode" == "test" ]]; then
+        test_mode=true
+    fi
+    local check_failed=false
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking required commands..."; fi
     for cmd in "${REQUIRED_CMDS[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then echo "❌ FATAL: Required command '$cmd' not found." >&2; check_failed=true; fi
@@ -402,31 +408,105 @@ run_preflight_checks() {
         if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
     fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
-    if [[ "$test_mode" == "true" ]]; then echo "--- Checking backup directories..."; fi
-    local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
-    for dir in "${DIRS_ARRAY[@]}"; do
-        if [[ ! -d "$dir" ]] || [[ "$dir" != */ ]]; then
-            local err_msg="A directory in BACKUP_DIRS ('$dir') must exist and end with a trailing slash ('/')."
-            if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
+    if [[ "$mode" != "restore" ]]; then
+        # 3. Check backup directories
+        if [[ "$test_mode" == "true" ]]; then echo "--- Checking backup directories..."; fi
+        local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
+        for dir in "${DIRS_ARRAY[@]}"; do
+            if [[ ! -d "$dir" ]] || [[ "$dir" != */ ]]; then
+                local err_msg="A directory in BACKUP_DIRS ('$dir') must exist and end with a trailing slash ('/')."
+                if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
+            fi
+            if [[ ! -r "$dir" ]]; then
+                local err_msg="A directory in BACKUP_DIRS ('$dir') is not readable."
+                if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
+            fi
+        done
+        if [[ "$test_mode" == "true" ]]; then echo "✅ All backup directories are valid."; fi
+        if [[ "$test_mode" == "true" ]]; then echo "--- Checking local disk space..."; fi
+        local required_space_kb=102400 # 100MB in KB
+        local available_space_kb
+        available_space_kb=$(df --output=avail "$(dirname "${LOG_FILE}")" | tail -n1)
+        if [[ "$available_space_kb" -lt "$required_space_kb" ]]; then
+            local err_msg="Insufficient disk space in $(dirname "${LOG_FILE}") to guarantee logging. ($((available_space_kb / 1024))MB available)"
+            if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi
+            exit 7
         fi
-        if [[ ! -r "$dir" ]]; then
-            local err_msg="A directory in BACKUP_DIRS ('$dir') is not readable."
-            if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
-        fi
-    done
-    if [[ "$test_mode" == "true" ]]; then echo "✅ All backup directories are valid."; fi
-    if [[ "$test_mode" == "true" ]]; then echo "--- Checking local disk space..."; fi
-    local required_space_kb=102400 # 100MB in KB
-    local available_space_kb
-    available_space_kb=$(df --output=avail "$(dirname "${LOG_FILE}")" | tail -n1)
-    if [[ "$available_space_kb" -lt "$required_space_kb" ]]; then
-        local err_msg="Insufficient disk space in $(dirname "${LOG_FILE}") to guarantee logging. ($((available_space_kb / 1024))MB available)"
-        if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi
-        exit 7
+        if [[ "$test_mode" == "true" ]]; then echo "✅ Local disk space OK."; fi
     fi
-    if [[ "$test_mode" == "true" ]]; then echo "✅ Local disk space OK."; fi
 }
+run_restore_mode() {
+    echo "--- RESTORE MODE ACTIVATED ---"
+    run_preflight_checks "restore"
+    local DIRS_ARRAY
+    read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
+    echo "Available backups to restore:"
+    select dir_choice in "${DIRS_ARRAY[@]}" "Cancel"; do
+        if [[ "$dir_choice" == "Cancel" ]]; then
+            echo "Restore cancelled."; return 0
+        elif [[ -n "$dir_choice" ]]; then
+            break
+        else
+            echo "Invalid selection. Please try again."; fi
+    done
+    local relative_path="${dir_choice#*./}"
+    local full_remote_source="${REMOTE_TARGET}${relative_path}"
+    local default_local_dest
+    default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#')
+    local final_dest
+    read -p $'\nEnter the destination path.\nPress [Enter] to use the original location ('"$default_local_dest"$'): ' final_dest
+    : "${final_dest:=$default_local_dest}"
+    local dest_created=false
+    if [[ ! -d "$final_dest" ]]; then
+        dest_created=true
+    fi
+    if [[ "$final_dest" != "$default_local_dest" && -d "$final_dest" ]]; then
+        local warning_msg="⚠️ WARNING: The custom destination directory '$final_dest' already exists. Files may be overwritten."
+        echo "$warning_msg"
+        log_message "$warning_msg"
+    fi
 
+    if ! mkdir -p "$final_dest"; then
+        echo "❌ FATAL: Could not create destination directory '$final_dest'. Aborting." >&2
+        return 1
+    fi
+    if [[ "$dest_created" == "true" ]]; then
+        chmod 700 "$final_dest"
+        log_message "Set permissions to 700 on newly created restore directory: $final_dest"
+    fi
+    echo "Restore destination is set to: $final_dest"
+    echo ""
+    echo "--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---"
+    log_message "Starting restore dry-run from ${full_remote_source} to ${final_dest}"
+    local rsync_restore_opts=(-avhi --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "ssh ${SSH_OPTS_STR:-}")
+    if ! rsync "${rsync_restore_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
+        echo "❌ DRY RUN FAILED. Rsync reported an error. Aborting." >&2
+        return 1
+    fi
+    echo "--- DRY RUN COMPLETE ---"
+    local confirmation
+    while true; do
+        read -p $'\nAre you sure you want to proceed with restoring files to '"$final_dest"'? [yes/no]: ' confirmation
+        case "$confirmation" in
+            yes) break ;;
+            no) echo "Restore aborted by user." ; return 0 ;;
+            *) echo "Please answer yes or no." ;;
+        esac
+    done
+    echo -e "\n--- PROCEEDING WITH RESTORE... ---"
+    log_message "Starting REAL restore from ${full_remote_source} to ${final_dest}"
+
+    if rsync "${rsync_restore_opts[@]}" "$full_remote_source" "$final_dest"; then
+        log_message "Restore completed successfully."
+        echo "✅ Restore of '$relative_path' to '$final_dest' completed successfully."
+        send_notification "✅ Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${relative_path} to ${final_dest}"
+    else
+        log_message "Restore FAILED with rsync exit code $?."
+        echo "❌ Restore FAILED. Check the rsync output above and the log file for details."
+        send_notification "❌ Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${relative_path} to ${final_dest} failed."
+        return 1
+    fi
+}
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
@@ -500,6 +580,10 @@ if [[ "${1:-}" ]]; then
             trap - ERR
             echo "--- TEST MODE ACTIVATED ---"; run_preflight_checks true
             echo "---------------------------"; echo "✅ All configuration checks passed."; exit 0 ;;
+        --restore)
+            trap - ERR
+            run_restore_mode
+            exit 0 ;;
     esac
 fi
 
