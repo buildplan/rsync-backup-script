@@ -62,8 +62,8 @@ All files should be placed in a single directory (e.g., `/home/user/scripts/back
 
 ```
 /home/user/scripts/backup/
-├── backup_script.sh      (The main script)
-└── backup.conf           (Your unified settings, credentials, and excludes)
+├── backup_script.sh      (main script)
+└── backup.conf           (settings, credentials, and excludes)
 ```
 
 -----
