@@ -1,27 +1,27 @@
 # Automated rsync Backup Script
 
-This script is for automating backups of a local directory to a remote server (like a Hetzner Storage Box) using `rsync` over SSH.
+This script automates backups of local directories to a remote server (such as a Hetzner Storage Box) using `rsync` over SSH.
 
 -----
 
 ## Features
 
-  - **Unified & Secure Configuration**: All settings are in a single `backup.conf` file, parsed safely to prevent code injection.
-  - **Portable**: The entire backup setup (script + config) can be moved to a new server by copying one directory.
-  - **Multi-Notification Support**: Sends notifications to **ntfy** and/or **Discord**, configurable with simple toggles.
-  - **Robust Error Handling**: Uses `set -Euo pipefail` and a global `ERR` trap to catch and report any unexpected errors.
-  - **Informative Reports**: Notifications include transfer size, files created, and files deleted.
-  - **Production Ready**: Uses `nice` and `ionice` to limit CPU/IO impact on the server.
-  - **User-Friendly Modes**: Includes `--dry-run`, `--checksum`, `--summary`, `--verbose` and a `--restore` flag for interctive restore of the files from remote backup.
-  - **Locking & Log Rotation**: Prevents concurrent runs and manages log file size automatically.
-  - **Prerequisite Checks**: Verifies that all required commands and SSH connectivity are working before running.
+- **Unified Configuration**: All settings are in a single `backup.conf` file with secure parsing
+- **Portable Setup**: The backup system can be migrated by copying the script and configuration
+- **Notification Support**: Sends notifications to ntfy and/or Discord, configurable via toggles
+- **Error Handling**: Uses strict shell options and traps to detect and report errors
+- **Detailed Reports**: Notifications include transfer size and file operation summaries
+- **System Friendly**: Uses `nice` and `ionice` to reduce resource impact during backups
+- **Multiple Operation Modes**: Supports dry run, checksum verification, summary reports, verbose output, and file restoration
+- **Concurrency Control**: Prevents simultaneous runs and handles log rotation automatically
+- **Pre-run Validation**: Checks for necessary commands and SSH connectivity before execution
 
 -----
 
 ## Usage
 
-  - **Download script and configuration file**:
-    You'll need two files: the script and the configuration file.
+#### Download the script and configuration:
+  - These are same files as at the bottom of this README.
 
     ```sh
     # 1. Get the script and make it executable
@@ -31,7 +31,7 @@ This script is for automating backups of a local directory to a remote server (l
     wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup.conf && chmod 600 backup.conf
     ```
 
-#### Verify Script Integrity (Recommended)
+#### Verify script integrity (optional):
 
   - To ensure the script is authentic, verify its SHA256 checksum.
 
@@ -43,14 +43,16 @@ This script is for automating backups of a local directory to a remote server (l
     sha256sum -c backup_script.sh.sha256
     ```
 
-  - **Run Silently**: `sudo ./backup_script.sh` (for cron)
-  - **Run with Live Progress**: `sudo ./backup_script.sh --verbose`
-  - **Dry Run**: `sudo ./backup_script.sh --dry-run` (see what would change without doing anything)
-  - **Check Integrity**: `sudo ./backup_script.sh --checksum` (Compares local and remote files using checksums; can be slow but is very thorough).
-  - **Get Mismatch Count**: `sudo ./backup_script.sh --summary` (Quickly reports the number of files that differ between local and remote).
-  - **Restore from remote backup**: `sudo ./backup_script.sh --restore` (Interactive restore with mandatory dry-run and confirmation; restore to original or custom path, respects SSH options and excludes.)
+#### Run modes:
 
-*The log file is located at `/var/log/backup_rsync.log` by default.*
+  - `sudo ./backup_script.sh` - Run silently (suitable for cron)
+  - `sudo ./backup_script.sh --verbose` - Run with live progress
+  - `sudo ./backup_script.sh --dry-run` - Preview changes without applying them
+  - `sudo ./backup_script.sh --checksum` - Verify backup integrity
+  - `sudo ./backup_script.sh --summary` - Report file differences
+  - `sudo ./backup_script.sh --restore` - Interactive restore with dry-run preview and confirmation
+
+*Default log location: `/var/log/backup_rsync.log`*
 
 -----
 
@@ -98,27 +100,17 @@ The script needs to log into the Hetzner Storage Box without a password.
     sudo cat /root/.ssh/id_ed25519.pub
     ```
 
-    *If you encounter permission issues use `sudo su` to access root directly.*
-
-  - Go to your Hetzner Robot panel, select your Storage Box, and paste the entire public key content into the "SSH Keys" section.
+  - Add the public key to your Hetzner Storage Box via the control panel. Test the connection:.
 
   - Or use the `ssh-copy-id` command (replace `u444300` and the hostname with your own details):
 
     ```sh
     sudo ssh-copy-id -p 23 -s u444300-sub4@u444300.your-storagebox.de
+
+    # Hetzner Storage Box requires the `-s` flag.
     ```
 
-    *Hetzner Storage Box requires the `-s` flag.*
-
-  - **Test the connection**. You can find the correct port and user in your `backup.conf` file.
-
-    ```sh
-    sudo ssh -p 23 u444300-sub4@u444300.your-storagebox.de 'echo "Connection successful"'
-    ```
-
-    If this works without asking for a password, you are ready.
-
-### 3\. Place and Configure Files
+### 3\. Place and Configure Files (If not downloading with `wget` above)
 
 1.  Create your script directory: `mkdir -p /home/user/scripts/backup && cd /home/user/scripts/backup`
 2.  Create the two files (`backup_script.sh` and `backup.conf`) in this directory using the content provided below.
@@ -130,7 +122,7 @@ The script needs to log into the Hetzner Storage Box without a password.
     ```sh
     chmod 600 backup.conf
     ```
-5.  Edit **`backup.conf`** to match your server paths, Hetzner details, notification credentials, and to customize your exclusion list.
+5.  Edit `backup.conf` to specify your local paths, remote server details, notification settings, and file exclusions.
 
 ### 4\. Set up a Cron Job
 
