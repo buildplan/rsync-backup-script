@@ -158,26 +158,19 @@ run_preflight_checks() {
     if [[ "$mode" == "test" ]]; then
         test_mode=true
     fi
-
     local check_failed=false
-
-    # 1. Check for required commands (always runs)
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking required commands..."; fi
     for cmd in "${REQUIRED_CMDS[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then echo "❌ FATAL: Required command '$cmd' not found." >&2; check_failed=true; fi
     done
     if [[ "$check_failed" == "true" ]]; then exit 10; fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ All required commands are present."; fi
-
-    # 2. Check SSH connectivity (always runs)
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking SSH connectivity..."; fi
     if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
         local err_msg="Unable to SSH into $HETZNER_BOX. Check keys and connectivity."
         if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
     fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
-
-    ### These next checks only run if NOT in restore mode ###
     if [[ "$mode" != "restore" ]]; then
         # 3. Check backup directories
         if [[ "$test_mode" == "true" ]]; then echo "--- Checking backup directories..."; fi
@@ -193,8 +186,6 @@ run_preflight_checks() {
             fi
         done
         if [[ "$test_mode" == "true" ]]; then echo "✅ All backup directories are valid."; fi
-
-        # 4. Check local disk space
         if [[ "$test_mode" == "true" ]]; then echo "--- Checking local disk space..."; fi
         local required_space_kb=102400 # 100MB in KB
         local available_space_kb
@@ -209,58 +200,53 @@ run_preflight_checks() {
 }
 run_restore_mode() {
     echo "--- RESTORE MODE ACTIVATED ---"
-    
-    # 1. Run essential pre-flight checks
-    run_preflight_checks --restore-mode # A new argument to run only relevant checks
-
-    # 2. Present a menu of available backups
+    run_preflight_checks "restore"
     local DIRS_ARRAY
     read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
-    
     echo "Available backups to restore:"
     select dir_choice in "${DIRS_ARRAY[@]}" "Cancel"; do
         if [[ "$dir_choice" == "Cancel" ]]; then
-            echo "Restore cancelled."
-            return 0
+            echo "Restore cancelled."; return 0
         elif [[ -n "$dir_choice" ]]; then
             break
         else
-            echo "Invalid selection. Please try again."
-        fi
+            echo "Invalid selection. Please try again."; fi
     done
-    
-    # 3. Determine remote source and default local destination
-    local remote_subdir
-    remote_subdir=$(basename "$dir_choice")
-    local full_remote_source="${REMOTE_TARGET}${remote_subdir}/"
+    local relative_path="${dir_choice#*./}"
+    local full_remote_source="${REMOTE_TARGET}${relative_path}"
     local default_local_dest
     default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#')
-
-    # 4. Ask for the destination path
     local final_dest
     read -p $'\nEnter the destination path.\nPress [Enter] to use the original location ('"$default_local_dest"$'): ' final_dest
-    # If the user enters nothing, use the default
     : "${final_dest:=$default_local_dest}"
+    local dest_created=false
+    if [[ ! -d "$final_dest" ]]; then
+        dest_created=true
+    fi
+    if [[ "$final_dest" != "$default_local_dest" && -d "$final_dest" ]]; then
+        local warning_msg="⚠️ WARNING: The custom destination directory '$final_dest' already exists. Files may be overwritten."
+        echo "$warning_msg"
+        log_message "$warning_msg"
+    fi
 
-    # Create the destination directory if it doesn't exist
     if ! mkdir -p "$final_dest"; then
         echo "❌ FATAL: Could not create destination directory '$final_dest'. Aborting." >&2
         return 1
     fi
+    if [[ "$dest_created" == "true" ]]; then
+        chmod 700 "$final_dest"
+        log_message "Set permissions to 700 on newly created restore directory: $final_dest"
+    fi
     echo "Restore destination is set to: $final_dest"
-
-    # 5. Perform a mandatory dry run
-    echo -e "\n--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---"
+    echo ""
+    echo "--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---"
     log_message "Starting restore dry-run from ${full_remote_source} to ${final_dest}"
-    
-    local rsync_restore_opts=(-avhi --progress) # Archive, verbose, human-readable, itemize, progress
+    local rsync_restore_opts=(-avhi --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "ssh ${SSH_OPTS_STR:-}")
     if ! rsync "${rsync_restore_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
         echo "❌ DRY RUN FAILED. Rsync reported an error. Aborting." >&2
         return 1
     fi
     echo "--- DRY RUN COMPLETE ---"
-
-    # 6. Get explicit confirmation
     local confirmation
     while true; do
         read -p $'\nAre you sure you want to proceed with restoring files to '"$final_dest"'? [yes/no]: ' confirmation
@@ -270,21 +256,20 @@ run_restore_mode() {
             *) echo "Please answer yes or no." ;;
         esac
     done
-
-    # 7. Execute the real restore
     echo -e "\n--- PROCEEDING WITH RESTORE... ---"
     log_message "Starting REAL restore from ${full_remote_source} to ${final_dest}"
 
     if rsync "${rsync_restore_opts[@]}" "$full_remote_source" "$final_dest"; then
         log_message "Restore completed successfully."
-        echo "✅ Restore of '$remote_subdir' to '$final_dest' completed successfully."
+        echo "✅ Restore of '$relative_path' to '$final_dest' completed successfully."
+        send_notification "✅ Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${relative_path} to ${final_dest}"
     else
         log_message "Restore FAILED with rsync exit code $?."
         echo "❌ Restore FAILED. Check the rsync output above and the log file for details."
+        send_notification "❌ Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${relative_path} to ${final_dest} failed."
         return 1
     fi
 }
-
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
