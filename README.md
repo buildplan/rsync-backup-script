@@ -100,7 +100,13 @@ The script needs to log into the Hetzner Storage Box without a password.
     sudo cat /root/.ssh/id_ed25519.pub
     ```
 
-  - Add the public key to your Hetzner Storage Box via the control panel. Test the connection:.
+  - Add the public key to your Hetzner Storage Box via the control panel. Test the connection:
+
+    ```sh
+    sudo ssh -p 23 u444300-sub4@u444300.your-storagebox.de pwd
+
+    # This should work without asking for a password, and show /home in terminal output.
+    ```
 
   - Or use the `ssh-copy-id` command (replace `u444300` and the hostname with your own details):
 
