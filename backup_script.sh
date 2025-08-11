@@ -67,7 +67,14 @@ for var in BACKUP_DIRS BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE \
         exit 1
     fi
 done
-
+if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
+    for var in RECYCLE_BIN_DIR RECYCLE_BIN_RETENTION_DAYS; do
+        if [ -z "${!var:-}" ]; then
+            echo "FATAL: When RECYCLE_BIN_ENABLED is true, '$var' must be set in $CONFIG_FILE." >&2
+            exit 1
+        fi
+    done
+fi
 # =================================================================
 #               SCRIPT CONFIGURATION (STATIC)
 # =================================================================
@@ -246,7 +253,7 @@ run_restore_mode() {
 }
 run_recycle_bin_cleanup() {
     if [[ "${RECYCLE_BIN_ENABLED:-false}" != "true" ]]; then return 0; fi
-    log_message "Checking for remote recycle bin folders older than ${RECYCLE_BIN_RETENTION_DAYS} days..." 
+    log_message "Checking for remote recycle bin folders older than ${RECYCLE_BIN_RETENTION_DAYS} days..."
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
     local remote_command='
     find -- "'"${remote_cleanup_path}"'" -mindepth 1 -maxdepth 1 -type d -mtime +'${RECYCLE_BIN_RETENTION_DAYS}' -exec rm -rf {} +
