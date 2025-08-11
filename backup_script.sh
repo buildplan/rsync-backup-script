@@ -259,30 +259,24 @@ run_restore_mode() {
 }
 run_recycle_bin_cleanup() {
     if [[ "${RECYCLE_BIN_ENABLED:-false}" != "true" ]]; then return 0; fi
-
     log_message "Checking remote recycle bin..."
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
-    local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -n)
-
+    local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes)
     local list_command="ls -1 \"$remote_cleanup_path\""
-    
     local all_folders
     all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
         log_message "Recycle bin not found or unable to list contents. Nothing to clean."
         return 0
     }
-
     if [[ -z "$all_folders" ]]; then
         log_message "No daily folders in recycle bin to check."
         return 0
     fi
-
     log_message "Checking for folders older than ${RECYCLE_BIN_RETENTION_DAYS} days..."
     local folders_to_delete=""
     local retention_days=${RECYCLE_BIN_RETENTION_DAYS}
     local threshold_timestamp
     threshold_timestamp=$(date -d "$retention_days days ago" +%s)
-
     while IFS= read -r folder; do
         if [[ "$folder" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
             local folder_timestamp
@@ -292,20 +286,15 @@ run_recycle_bin_cleanup() {
             fi
         fi
     done <<< "$all_folders"
-
     if [[ -n "$folders_to_delete" ]]; then
         log_message "Removing old recycle bin folders:"
-        
         local empty_dir
         empty_dir=$(mktemp -d)
-
         while IFS= read -r folder; do
             if [[ -n "$folder" ]]; then
                 log_message "  Deleting: $folder"
                 local remote_dir_to_delete="${remote_cleanup_path}/${folder}/"
-                
-                rsync -a --delete "${RSYNC_BASE_OPTS[@]}" "$empty_dir/" "${HETZNER_BOX}:${remote_dir_to_delete}" >/dev/null 2>> "${LOG_FILE:-/dev/null}"
-                
+                rsync -a --delete -e "$SSH_CMD" "$empty_dir/" "${HETZNER_BOX}:${remote_dir_to_delete}" >/dev/null 2>> "${LOG_FILE:-/dev/null}"                
                 ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "rmdir \"$remote_dir_to_delete\"" 2>> "${LOG_FILE:-/dev/null}"
             fi
         done <<< "$folders_to_delete"
