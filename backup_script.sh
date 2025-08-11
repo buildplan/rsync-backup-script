@@ -90,10 +90,15 @@ REMOTE_TARGET="${HETZNER_BOX}:${BOX_DIR}"
 LOCK_FILE="/tmp/backup_rsync.lock"
 MAX_LOG_SIZE=10485760 # 10 MB in bytes
 
+SSH_CMD="ssh"
+if (( ${#SSH_OPTS_ARRAY[@]} > 0 )); then
+    SSH_CMD+=$(printf " %q" "${SSH_OPTS_ARRAY[@]}")
+fi
+
 RSYNC_BASE_OPTS=(
     -aR -z --delete --partial --timeout=60 --mkpath
     --exclude-from="$EXCLUDE_FILE_TMP"
-    -e "ssh ${SSH_OPTS_ARRAY[@]}"
+    -e "$SSH_CMD"
 )
 
 # =================================================================
