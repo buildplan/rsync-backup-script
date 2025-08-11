@@ -53,7 +53,17 @@ This script automates backups of local directories to a remote server (such as a
   - `sudo ./backup_script.sh --test` - Checks to validate `backup.conf`, permissions and SSH connectivity
   - `sudo ./backup_script.sh --restore` - Interactive restore with dry-run preview and confirmation
 
-*Default log location: `/var/log/backup_rsync.log`*
+
+> *Default log location: `/var/log/backup_rsync.log`*
+
+
+#### Error codes
+
+  - **Exit Code `2`**: **Configuration Error.** A fatal error related to the `BACKUP_DIRS` variable. This can mean a directory in the list does not exist, is not readable, or is missing the required `/./` syntax.
+  - **Exit Code `5`**: **Lock Contention.** Another instance of the script is already running.
+  - **Exit Code `6`**: **SSH Failure.** The pre-flight check failed to establish an SSH connection to the remote server.
+  - **Exit Code `7`**: **Disk Space Error.** Insufficient local disk space is available to guarantee logging.
+  - **Exit Code `10`**: **Prerequisite Missing.** A required command (like `rsync`, `ssh`, or `curl`) was not found on the system.
 
 -----
 
