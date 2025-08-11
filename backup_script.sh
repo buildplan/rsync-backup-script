@@ -21,28 +21,36 @@ CONFIG_FILE="${SCRIPT_DIR}/backup.conf"
 
 # --- Create a temporary file for rsync exclusions ---
 EXCLUDE_FILE_TMP=$(mktemp)
+SSH_OPTS_ARRAY=()
 
 # --- Securely parse the unified configuration file ---
 if [ -f "$CONFIG_FILE" ]; then
     in_exclude_block=false
+    in_ssh_opts_block=false
     while IFS= read -r line; do
-        if [[ "$line" == "BEGIN_EXCLUDES" ]]; then
-            in_exclude_block=true; continue
-        elif [[ "$line" == "END_EXCLUDES" ]]; then
-            in_exclude_block=false; continue
-        fi
+        # --- Handle block markers ---
+        if [[ "$line" == "BEGIN_EXCLUDES" ]]; then in_exclude_block=true; continue; fi
+        if [[ "$line" == "END_EXCLUDES" ]]; then in_exclude_block=false; continue; fi
+        if [[ "$line" == "BEGIN_SSH_OPTS" ]]; then in_ssh_opts_block=true; continue; fi
+        if [[ "$line" == "END_SSH_OPTS" ]]; then in_ssh_opts_block=false; continue; fi
 
+        # --- Process lines within blocks ---
         if $in_exclude_block; then
             [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
             continue
         fi
+        if $in_ssh_opts_block; then
+            [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && SSH_OPTS_ARRAY+=("$line")
+            continue
+        fi
         
+        # --- Process key-value pairs ---
         if [[ "$line" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.*) ]]; then
             key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
             value="${value%\"}"; value="${value#\"}"
 
             case "$key" in
-                BACKUP_DIRS|BOX_DIR|HETZNER_BOX|SSH_OPTS_STR|LOG_FILE|LOG_RETENTION_DAYS|\
+                BACKUP_DIRS|BOX_DIR|HETZNER_BOX|LOG_FILE|LOG_RETENTION_DAYS|\
                 NTFY_ENABLED|DISCORD_ENABLED|NTFY_TOKEN|NTFY_URL|DISCORD_WEBHOOK_URL|\
                 NTFY_PRIORITY_SUCCESS|NTFY_PRIORITY_WARNING|NTFY_PRIORITY_FAILURE|\
                 RECYCLE_BIN_ENABLED|RECYCLE_BIN_DIR|RECYCLE_BIN_RETENTION_DAYS)
@@ -59,7 +67,7 @@ else
 fi
 
 # --- Validate that all required configuration variables are set ---
-for var in BACKUP_DIRS BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE \
+for var in BACKUP_DIRS BOX_DIR HETZNER_BOX LOG_FILE \
            NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE \
            LOG_RETENTION_DAYS; do
     if [ -z "${!var:-}" ]; then
@@ -85,7 +93,7 @@ MAX_LOG_SIZE=10485760 # 10 MB in bytes
 RSYNC_BASE_OPTS=(
     -aR -z --delete --partial --timeout=60 --mkpath
     --exclude-from="$EXCLUDE_FILE_TMP"
-    -e "ssh ${SSH_OPTS_STR:-}"
+    -e "ssh ${SSH_OPTS_ARRAY[@]}"
 )
 
 # =================================================================
@@ -120,7 +128,7 @@ send_notification() {
     send_discord "$title" "$discord_status" "$message"
 }
 run_integrity_check() {
-    local rsync_check_opts=(-aincR -c --delete --mkpath --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_STR:-}")
+    local rsync_check_opts=(-aincR -c --delete --mkpath --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "ssh ${SSH_OPTS_ARRAY[@]}")
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
     for dir in "${DIRS_ARRAY[@]}"; do
         echo "--- Integrity Check: $dir ---" >&2
@@ -168,7 +176,7 @@ run_preflight_checks() {
     if [[ "$check_failed" == "true" ]]; then exit 10; fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ All required commands are present."; fi
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking SSH connectivity..."; fi
-    if ! ssh ${SSH_OPTS_STR:-} -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
+    if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
         local err_msg="Unable to SSH into $HETZNER_BOX. Check keys and connectivity."
         if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
     fi
@@ -227,7 +235,7 @@ run_restore_mode() {
     echo "Restore destination is set to: $final_dest"
     echo ""; echo "--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---"
     log_message "Starting restore dry-run from ${full_remote_source} to ${final_dest}"
-    local rsync_restore_opts=(-avhi --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "ssh ${SSH_OPTS_STR:-}")
+    local rsync_restore_opts=(-avhi --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "ssh ${SSH_OPTS_ARRAY[@]}")
     if ! rsync "${rsync_restore_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
         echo "❌ DRY RUN FAILED. Rsync reported an error. Aborting." >&2; return 1
     fi
@@ -256,11 +264,11 @@ run_recycle_bin_cleanup() {
     log_message "Checking for remote recycle bin folders older than ${RECYCLE_BIN_RETENTION_DAYS} days..."
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
     local remote_command='
-        if [ ! -d "'"${remote_cleanup_path}"'" ]; then exit 0; fi        
+        if [ ! -d "'"${remote_cleanup_path}"'" ]; then exit 0; fi
         find -- "'"${remote_cleanup_path}"'" -mindepth 1 -maxdepth 1 -type d -mtime +'${RECYCLE_BIN_RETENTION_DAYS}' -print -exec rm -rf {} +
     '
     local deleted
-    deleted=$(ssh ${SSH_OPTS_STR:-} "$HETZNER_BOX" "$remote_command" 2>> "${LOG_FILE:-/dev/null}") || {
+    deleted=$(ssh "${SSH_OPTS_ARRAY[@]}" "$HETZNER_BOX" "$remote_command" 2>> "${LOG_FILE:-/dev/null}") || {
         local exit_code=$?
         log_message "WARNING: Remote recycle bin cleanup failed with exit code ${exit_code}."
         return 0
