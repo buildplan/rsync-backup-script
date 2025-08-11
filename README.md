@@ -50,6 +50,7 @@ This script automates backups of local directories to a remote server (such as a
   - `sudo ./backup_script.sh --dry-run` - Preview changes without applying them
   - `sudo ./backup_script.sh --checksum` - Verify backup integrity
   - `sudo ./backup_script.sh --summary` - Report file differences
+  - `sudo ./backup_script.sh --test` - Checks to validate `backup.conf`, permissions and SSH connectivity
   - `sudo ./backup_script.sh --restore` - Interactive restore with dry-run preview and confirmation
 
 *Default log location: `/var/log/backup_rsync.log`*
@@ -74,10 +75,14 @@ Follow these steps to get the backup system running.
 
 ### 1\. Prerequisites
 
-First, ensure the required tools are installed. On Debian/Ubuntu, you can run:
+Ensure the required tools are installed, run:
 
 ```sh
+# On Debian/Ubuntu
 sudo apt-get update && sudo apt-get install rsync curl coreutils util-linux
+
+# On CentOS/RHEL/Fedora
+sudo dnf install rsync curl coreutils util-linux
 ```
 
 *(coreutils provides `numfmt`, `stat`, etc. and util-linux provides `flock` and `mktemp`)*
