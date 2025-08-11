@@ -312,7 +312,6 @@ if [[ "${1:-}" ]]; then
             for dir in "${DIRS_ARRAY[@]}"; do
                 echo -e "\n--- Checking dry run for: $dir ---"
                 rsync_dry_opts=( "${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --out-format="%i %n%L" --info=stats2,name,flist2 )
-                ## FIX: Corrected variable name from RECYCLE-BIN_ENABLED to RECYCLE_BIN_ENABLED
                 if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
                     backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
                     rsync_dry_opts+=(--backup --backup-dir="$backup_dir")
@@ -386,7 +385,6 @@ for dir in "${DIRS_ARRAY[@]}"; do
     log_message "Backing up directory: $dir"
     RSYNC_LOG_TMP=$(mktemp)
     RSYNC_EXIT_CODE=0; RSYNC_OPTS=("${RSYNC_BASE_OPTS[@]}")
-    ## FIX: Corrected variable name from RECYCLE-BIN_ENABLED to RECYCLE_BIN_ENABLED
     if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
         backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
         RSYNC_OPTS+=(--backup --backup-dir="$backup_dir")
