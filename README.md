@@ -100,18 +100,18 @@ The script needs to log into the Hetzner Storage Box without a password.
     sudo cat /root/.ssh/id_ed25519.pub
     ```
 
-  - Add the public key to your Hetzner Storage Box via the control panel. Test the connection:
+  - Add the public key to your Hetzner Storage Box via the control panel. Test the connection (replace `u123456` and `u123456-sub4`):
 
     ```sh
-    sudo ssh -p 23 u444300-sub4@u444300.your-storagebox.de pwd
+    sudo ssh -p 23 u123456-sub4@u123456.your-storagebox.de pwd
 
     # This should work without asking for a password, and show /home in terminal output.
     ```
 
-  - Or use the `ssh-copy-id` command (replace `u444300` and the hostname with your own details):
+  - Or use the `ssh-copy-id` command (replace `u123456` and `u123456-sub4`):
 
     ```sh
-    sudo ssh-copy-id -p 23 -s u444300-sub4@u444300.your-storagebox.de
+    sudo ssh-copy-id -p 23 -s u123456-sub4@u123456.your-storagebox.de
 
     # Hetzner Storage Box requires the `-s` flag.
     ```
@@ -176,7 +176,7 @@ BACKUP_DIRS="/home/./user/ /var/./log/ /etc/./nginx/"
 BOX_DIR="/home/myvps/"
 
 # --- Connection Details ---
-HETZNER_BOX="u444300-sub4@u444300.your-storagebox.de"
+HETZNER_BOX="u123456-sub4@u123456.your-storagebox.de"
 
 # Add any other SSH options here. They will be split by spaces.
 # Example for using a specific SSH key: -p 23 -i /root/.ssh/id_hetzner_key
