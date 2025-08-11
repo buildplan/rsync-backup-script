@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.25.0 - 2025.08.11 ========================
+# ===================== v0.24 - 2025.08.11 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -39,7 +39,7 @@ if [ -f "$CONFIG_FILE" ]; then
             [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
             continue
         fi
-        if $in_ssh_opts_block;
+        if $in_ssh_opts_block; then
             [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && SSH_OPTS_ARRAY+=("$line")
             continue
         fi
@@ -286,7 +286,7 @@ run_recycle_bin_cleanup() {
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
-REQUIRED_CMDS=(rsync ssh curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename read)
+REQUIRED_CMDS=(rsync ssh curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename)
 
 # =================================================================
 #                       SCRIPT EXECUTION
