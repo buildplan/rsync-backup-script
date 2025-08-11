@@ -256,10 +256,7 @@ run_recycle_bin_cleanup() {
     log_message "Checking for remote recycle bin folders older than ${RECYCLE_BIN_RETENTION_DAYS} days..."
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
     local remote_command='
-        # If the main recycle bin directory does not exist, exit silently.
-        if [ ! -d "'"${remote_cleanup_path}"'" ]; then exit 0; fi
-        
-        # Find and print old daily folders before deleting them.
+        if [ ! -d "'"${remote_cleanup_path}"'" ]; then exit 0; fi        
         find -- "'"${remote_cleanup_path}"'" -mindepth 1 -maxdepth 1 -type d -mtime +'${RECYCLE_BIN_RETENTION_DAYS}' -print -exec rm -rf {} +
     '
     local deleted
