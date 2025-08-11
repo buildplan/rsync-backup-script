@@ -195,6 +195,15 @@ LOG_FILE="/var/log/backup_rsync.log"
 # Delete rotated logs older than this many days
 LOG_RETENTION_DAYS=90
 
+# --- Recycle Bin ---
+# If enabled, files deleted from the source will be moved to a remote
+# recycle bin instead of being permanently removed. This provides a safety net.
+RECYCLE_BIN_ENABLED=true
+# The name of the directory on the remote server to use as the recycle bin.
+RECYCLE_BIN_DIR="recycle_bin"
+# The number of days to keep daily backup folders in the recycle bin before deleting them.
+RECYCLE_BIN_RETENTION_DAYS=30
+
 # --- Notification Toggles ---
 # Set to 'true' to enable, 'false' to disable.
 NTFY_ENABLED=true
