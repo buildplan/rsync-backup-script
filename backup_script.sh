@@ -25,16 +25,14 @@ SSH_OPTS_ARRAY=()
 
 # --- Securely parse the unified configuration file ---
 if [ -f "$CONFIG_FILE" ]; then
-    in_exclude_block=false
-    in_ssh_opts_block=false
+    in_exclude_block="false"
+    in_ssh_opts_block="false"
     while IFS= read -r line; do
-        # --- Handle block markers ---
-        if [[ "$line" == "BEGIN_EXCLUDES" ]]; then in_exclude_block=true; continue; fi
-        if [[ "$line" == "END_EXCLUDES" ]]; then in_exclude_block=false; continue; fi
-        if [[ "$line" == "BEGIN_SSH_OPTS" ]]; then in_ssh_opts_block=true; continue; fi
-        if [[ "$line" == "END_SSH_OPTS" ]]; then in_ssh_opts_block=false; continue; fi
+        if [[ "$line" == "BEGIN_EXCLUDES" ]]; then in_exclude_block="true"; continue; fi
+        if [[ "$line" == "END_EXCLUDES" ]]; then in_exclude_block="false"; continue; fi
+        if [[ "$line" == "BEGIN_SSH_OPTS" ]]; then in_ssh_opts_block="true"; continue; fi
+        if [[ "$line" == "END_SSH_OPTS" ]]; then in_ssh_opts_block="false"; continue; fi
 
-        # --- Process lines within blocks ---
         if [[ "$in_exclude_block" == "true" ]]; then
             [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && echo "$line" >> "$EXCLUDE_FILE_TMP"
             continue
@@ -44,7 +42,6 @@ if [ -f "$CONFIG_FILE" ]; then
             continue
         fi
         
-        # --- Process key-value pairs ---
         if [[ "$line" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.*) ]]; then
             key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
             value="${value%\"}"; value="${value#\"}"
@@ -90,7 +87,7 @@ REMOTE_TARGET="${HETZNER_BOX}:${BOX_DIR}"
 LOCK_FILE="/tmp/backup_rsync.lock"
 MAX_LOG_SIZE=10485760 # 10 MB in bytes
 
-SSH_CMD="ssh"
+SSH_CMD="ssh -n"
 if (( ${#SSH_OPTS_ARRAY[@]} > 0 )); then
     SSH_CMD+=$(printf " %q" "${SSH_OPTS_ARRAY[@]}")
 fi
@@ -267,23 +264,58 @@ run_restore_mode() {
 }
 run_recycle_bin_cleanup() {
     if [[ "${RECYCLE_BIN_ENABLED:-false}" != "true" ]]; then return 0; fi
-    log_message "Checking for remote recycle bin folders older than ${RECYCLE_BIN_RETENTION_DAYS} days..."
+
+    log_message "Checking remote recycle bin..."
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
-    local remote_command='
-        if [ ! -d "'"${remote_cleanup_path}"'" ]; then exit 0; fi
-        find -- "'"${remote_cleanup_path}"'" -mindepth 1 -maxdepth 1 -type d -mtime +'${RECYCLE_BIN_RETENTION_DAYS}' -print -exec rm -rf {} +
-    '
-    local deleted
-    deleted=$(ssh "${SSH_OPTS_ARRAY[@]}" "$HETZNER_BOX" "$remote_command" 2>> "${LOG_FILE:-/dev/null}") || {
-        local exit_code=$?
-        log_message "WARNING: Remote recycle bin cleanup failed with exit code ${exit_code}."
+    local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -n)
+
+    local list_command="ls -1 \"$remote_cleanup_path\""
+    
+    local all_folders
+    all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
+        log_message "Recycle bin not found or unable to list contents. Nothing to clean."
         return 0
     }
-    if [[ -n "$deleted" ]]; then
-        log_message "Removed old recycle bin folders:"
+
+    if [[ -z "$all_folders" ]]; then
+        log_message "No daily folders in recycle bin to check."
+        return 0
+    fi
+
+    log_message "Checking for folders older than ${RECYCLE_BIN_RETENTION_DAYS} days..."
+    local folders_to_delete=""
+    local retention_days=${RECYCLE_BIN_RETENTION_DAYS}
+    local threshold_timestamp
+    threshold_timestamp=$(date -d "$retention_days days ago" +%s)
+
+    while IFS= read -r folder; do
+        if [[ "$folder" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            local folder_timestamp
+            folder_timestamp=$(date -d "$folder" +%s)
+            if (( folder_timestamp < threshold_timestamp )); then
+                folders_to_delete+="${folder}"$'\n'
+            fi
+        fi
+    done <<< "$all_folders"
+
+    if [[ -n "$folders_to_delete" ]]; then
+        log_message "Removing old recycle bin folders:"
+        
+        local empty_dir
+        empty_dir=$(mktemp -d)
+
         while IFS= read -r folder; do
-            log_message "  $folder"
-        done <<< "$deleted"
+            if [[ -n "$folder" ]]; then
+                log_message "  Deleting: $folder"
+                local remote_dir_to_delete="${remote_cleanup_path}/${folder}/"
+                
+                rsync -a --delete -e "$SSH_CMD" "$empty_dir/" "${HETZNER_BOX}:${remote_dir_to_delete}" >/dev/null 2>> "${LOG_FILE:-/dev/null}"
+                
+                ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "rmdir \"$remote_dir_to_delete\"" 2>> "${LOG_FILE:-/dev/null}"
+            fi
+        done <<< "$folders_to_delete"
+
+        rm -rf "$empty_dir"
     else
         log_message "No old recycle bin folders to remove."
     fi
@@ -292,7 +324,7 @@ run_recycle_bin_cleanup() {
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
-REQUIRED_CMDS=(rsync ssh curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename read)
+REQUIRED_CMDS=(rsync ssh curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename)
 
 # =================================================================
 #                       SCRIPT EXECUTION
