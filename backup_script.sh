@@ -25,8 +25,8 @@ SSH_OPTS_ARRAY=()
 
 # --- Securely parse the unified configuration file ---
 if [ -f "$CONFIG_FILE" ]; then
-    in_exclude_block=false
-    in_ssh_opts_block=false
+    in_exclude_block="false"
+    in_ssh_opts_block="false"
     while IFS= read -r line; do
         # --- Handle block markers ---
         if [[ "$line" == "BEGIN_EXCLUDES" ]]; then in_exclude_block=true; continue; fi
@@ -117,9 +117,9 @@ send_discord() {
     local color; case "$status" in
         success) color=3066993 ;; warning) color=16776960 ;; failure) color=15158332 ;; *) color=9807270 ;;
     esac
-    local escaped_message; escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    local escaped_title; escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
     local json_payload; printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
-        "$title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+        "$escaped_title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
     curl -s --max-time 15 -H "Content-Type: application/json" -d "$json_payload" "$DISCORD_WEBHOOK_URL" > /dev/null 2>> "${LOG_FILE:-/dev/null}"
 }
 send_notification() {
