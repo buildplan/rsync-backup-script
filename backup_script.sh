@@ -363,8 +363,8 @@ for dir in "${DIRS_ARRAY[@]}"; do
     RSYNC_LOG_TMP=$(mktemp)
     RSYNC_EXIT_CODE=0; RSYNC_OPTS=("${RSYNC_BASE_OPTS[@]}")
     if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
-    backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
-    RSYNC_OPTS+=(--backup --backup-dir="$backup_dir")
+        backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
+        RSYNC_OPTS+=(--backup --backup-dir="$backup_dir")
     fi
     if [[ "$VERBOSE_MODE" == "true" ]]; then
         RSYNC_OPTS+=(--info=stats2,progress2)
