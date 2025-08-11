@@ -254,7 +254,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-# ===================== v0.23 - 2025.08.11 ========================
+# ===================== v0.24 - 2025.08.11 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -299,7 +299,8 @@ if [ -f "$CONFIG_FILE" ]; then
             case "$key" in
                 BACKUP_DIRS|BOX_DIR|HETZNER_BOX|SSH_OPTS_STR|LOG_FILE|LOG_RETENTION_DAYS|\
                 NTFY_ENABLED|DISCORD_ENABLED|NTFY_TOKEN|NTFY_URL|DISCORD_WEBHOOK_URL|\
-                NTFY_PRIORITY_SUCCESS|NTFY_PRIORITY_WARNING|NTFY_PRIORITY_FAILURE)
+                NTFY_PRIORITY_SUCCESS|NTFY_PRIORITY_WARNING|NTFY_PRIORITY_FAILURE|\
+                RECYCLE_BIN_ENABLED|RECYCLE_BIN_DIR|RECYCLE_BIN_RETENTION_DAYS)
                     declare "$key"="$value"
                     ;;
                 *)
@@ -321,7 +322,14 @@ for var in BACKUP_DIRS BOX_DIR HETZNER_BOX SSH_OPTS_STR LOG_FILE \
         exit 1
     fi
 done
-
+if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
+    for var in RECYCLE_BIN_DIR RECYCLE_BIN_RETENTION_DAYS; do
+        if [ -z "${!var:-}" ]; then
+            echo "FATAL: When RECYCLE_BIN_ENABLED is true, '$var' must be set in $CONFIG_FILE." >&2
+            exit 1
+        fi
+    done
+fi
 # =================================================================
 #               SCRIPT CONFIGURATION (STATIC)
 # =================================================================
@@ -498,6 +506,20 @@ run_restore_mode() {
         return 1
     fi
 }
+run_recycle_bin_cleanup() {
+    if [[ "${RECYCLE_BIN_ENABLED:-false}" != "true" ]]; then return 0; fi
+    log_message "Checking for remote recycle bin folders older than ${RECYCLE_BIN_RETENTION_DAYS} days..."
+    local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
+    local remote_command='
+    find -- "'"${remote_cleanup_path}"'" -mindepth 1 -maxdepth 1 -type d -mtime +'${RECYCLE_BIN_RETENTION_DAYS}' -exec rm -rf {} +
+    '
+    if ssh ${SSH_OPTS_STR:-} "$HETZNER_BOX" "$remote_command" 2>> "${LOG_FILE:-/dev/null}"; then
+        log_message "Remote recycle bin cleanup completed successfully."
+    else
+        local exit_code=$?
+        log_message "WARNING: Remote recycle bin cleanup failed with exit code ${exit_code}."
+    fi
+}
 
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
@@ -522,6 +544,10 @@ if [[ "${1:-}" ]]; then
             for dir in "${DIRS_ARRAY[@]}"; do
                 echo -e "\n--- Checking dry run for: $dir ---"
                 rsync_dry_opts=( "${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --out-format="%i %n%L" --info=stats2,name,flist2 )
+                if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
+                    backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
+                    rsync_dry_opts+=(--backup --backup-dir="$backup_dir")
+                fi
                 DRY_RUN_LOG_TMP=$(mktemp)
                 if ! rsync "${rsync_dry_opts[@]}" "$dir" "$REMOTE_TARGET" > "$DRY_RUN_LOG_TMP" 2>&1; then DRY_RUN_FAILED=true; fi
                 echo "---- Preview of changes (first 20) ----"
@@ -591,6 +617,10 @@ for dir in "${DIRS_ARRAY[@]}"; do
     log_message "Backing up directory: $dir"
     RSYNC_LOG_TMP=$(mktemp)
     RSYNC_EXIT_CODE=0; RSYNC_OPTS=("${RSYNC_BASE_OPTS[@]}")
+    if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
+    backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
+    RSYNC_OPTS+=(--backup --backup-dir="$backup_dir")
+    fi
     if [[ "$VERBOSE_MODE" == "true" ]]; then
         RSYNC_OPTS+=(--info=stats2,progress2)
         nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$REMOTE_TARGET" 2>&1 | tee "$RSYNC_LOG_TMP"
@@ -611,6 +641,8 @@ for dir in "${DIRS_ARRAY[@]}"; do
         log_message "FAILED for $dir: rsync exited with code: $RSYNC_EXIT_CODE."; overall_exit_code=1
     fi
 done
+
+run_recycle_bin_cleanup
 
 END_TIME=$(date +%s); DURATION=$((END_TIME - START_TIME)); trap - ERR
 
