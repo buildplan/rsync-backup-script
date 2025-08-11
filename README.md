@@ -520,13 +520,22 @@ run_recycle_bin_cleanup() {
     log_message "Checking for remote recycle bin folders older than ${RECYCLE_BIN_RETENTION_DAYS} days..."
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
     local remote_command='
-    find -- "'"${remote_cleanup_path}"'" -mindepth 1 -maxdepth 1 -type d -mtime +'${RECYCLE_BIN_RETENTION_DAYS}' -exec rm -rf {} +
+        if [ ! -d "'"${remote_cleanup_path}"'" ]; then exit 0; fi        
+        find -- "'"${remote_cleanup_path}"'" -mindepth 1 -maxdepth 1 -type d -mtime +'${RECYCLE_BIN_RETENTION_DAYS}' -print -exec rm -rf {} +
     '
-    if ssh ${SSH_OPTS_STR:-} "$HETZNER_BOX" "$remote_command" 2>> "${LOG_FILE:-/dev/null}"; then
-        log_message "Remote recycle bin cleanup completed successfully."
-    else
+    local deleted
+    deleted=$(ssh ${SSH_OPTS_STR:-} "$HETZNER_BOX" "$remote_command" 2>> "${LOG_FILE:-/dev/null}") || {
         local exit_code=$?
         log_message "WARNING: Remote recycle bin cleanup failed with exit code ${exit_code}."
+        return 0
+    }
+    if [[ -n "$deleted" ]]; then
+        log_message "Removed old recycle bin folders:"
+        while IFS= read -r folder; do
+            log_message "  $folder"
+        done <<< "$deleted"
+    else
+        log_message "No old recycle bin folders to remove."
     fi
 }
 
