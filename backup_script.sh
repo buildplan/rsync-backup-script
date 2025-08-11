@@ -195,6 +195,15 @@ run_preflight_checks() {
                 local err_msg="A directory in BACKUP_DIRS ('$dir') must exist and end with a trailing slash ('/')."
                 if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
             fi
+            if [[ "$dir" != *"/./"* ]]; then
+                local err_msg="Directory '$dir' in BACKUP_DIRS is missing the required '/./' syntax."
+                if [[ "$test_mode" == "true" ]]; then 
+                    echo "❌ FATAL: $err_msg"
+                else
+                    send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"
+                fi
+                exit 2
+            fi
             if [[ ! -r "$dir" ]]; then
                 local err_msg="A directory in BACKUP_DIRS ('$dir') is not readable."
                 if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
@@ -269,7 +278,7 @@ run_recycle_bin_cleanup() {
     if [[ "${RECYCLE_BIN_ENABLED:-false}" != "true" ]]; then return 0; fi
     log_message "Checking remote recycle bin..."
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
-    local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -n)
+    local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -n)
     local list_command="ls -1 \"$remote_cleanup_path\""
     local all_folders
     all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
