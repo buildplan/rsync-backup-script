@@ -283,7 +283,7 @@ if [[ "${1:-}" ]]; then
                 echo -e "\n--- Checking dry run for: $dir ---"
                 rsync_dry_opts=( "${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --out-format="%i %n%L" --info=stats2,name,flist2 )
                 if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
-                    local backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
+                    backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
                     rsync_dry_opts+=(--backup --backup-dir="$backup_dir")
                 fi
                 DRY_RUN_LOG_TMP=$(mktemp)
