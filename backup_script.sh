@@ -246,13 +246,12 @@ run_restore_mode() {
 }
 run_recycle_bin_cleanup() {
     if [[ "${RECYCLE_BIN_ENABLED:-false}" != "true" ]]; then return 0; fi
-    log_message "Checking remote recycle bin for items older than ${RECYCLE_BIN_RETENTION_DAYS} days..."
+    log_message "Checking for remote recycle bin folders older than ${RECYCLE_BIN_RETENTION_DAYS} days..." 
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
     local remote_command='
-    find -- "'"${remote_cleanup_path}"'" -type f -mtime +'${RECYCLE_BIN_RETENTION_DAYS}' -print -delete;
-    find -- "'"${remote_cleanup_path}"'" -mindepth 1 -type d -empty -delete;
+    find -- "'"${remote_cleanup_path}"'" -mindepth 1 -maxdepth 1 -type d -mtime +'${RECYCLE_BIN_RETENTION_DAYS}' -exec rm -rf {} +
     '
-    if ssh "${SSH_OPTS_ARRAY[@]}" "$HETZNER_BOX" "$remote_command" 2>> "${LOG_FILE:-/dev/null}"; then
+    if ssh ${SSH_OPTS_STR:-} "$HETZNER_BOX" "$remote_command" 2>> "${LOG_FILE:-/dev/null}"; then
         log_message "Remote recycle bin cleanup completed successfully."
     else
         local exit_code=$?
@@ -283,6 +282,10 @@ if [[ "${1:-}" ]]; then
             for dir in "${DIRS_ARRAY[@]}"; do
                 echo -e "\n--- Checking dry run for: $dir ---"
                 rsync_dry_opts=( "${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --out-format="%i %n%L" --info=stats2,name,flist2 )
+                if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
+                    local backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
+                    rsync_dry_opts+=(--backup --backup-dir="$backup_dir")
+                fi
                 DRY_RUN_LOG_TMP=$(mktemp)
                 if ! rsync "${rsync_dry_opts[@]}" "$dir" "$REMOTE_TARGET" > "$DRY_RUN_LOG_TMP" 2>&1; then DRY_RUN_FAILED=true; fi
                 echo "---- Preview of changes (first 20) ----"
