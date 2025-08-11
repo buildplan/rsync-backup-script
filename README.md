@@ -177,11 +177,14 @@ To run the backup automatically, edit the root crontab.
 # 1. End the path with a trailing slash (e.g., "user/").
 # 2. Use "/./" to mark the part of the path you want to create on the destination.
 #    Example: "/home/./user/" will create a "user" directory in your BOX_DIR.
-BACKUP_DIRS="/home/./user/ /var/./log/ /etc/./nginx/"
+BACKUP_DIRS="/./home/user/ /./var/log/ /./etc/nginx/"
+
+# The root folder on the remote server where backups will be placed.
+# IMPORTANT: This path MUST end with a trailing slash (e.g., /backups/).
 BOX_DIR="/home/myvps/"
 
 # --- Connection Details ---
-HETZNER_BOX="u123456-sub4@u123456.your-storagebox.de"
+HETZNER_BOX="u444300-sub4@u444300.your-storagebox.de"
 
 # Add any other SSH options here. They will be split by spaces.
 # Example for using a specific SSH key: -p 23 -i /root/.ssh/id_hetzner_key
@@ -230,6 +233,18 @@ __pycache__/
 /lost+found/
 .DS_Store
 Thumbs.db
+
+# Some common files which can be skipped
+.bash_history
+.bash_logout
+.bashrc
+.config/
+.docker/
+.local/
+.profile
+.ssh/
+.sudo_as_admin_successful
+.wget-hsts
 END_EXCLUDES
 ```
 
