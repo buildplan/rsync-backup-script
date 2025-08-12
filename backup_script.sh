@@ -2,7 +2,7 @@
 # ===================== v0.25 - 2025.08.12 ========================
 #
 # =================================================================
-#                         SCRIPT INITIALIZATION & SETUP
+#                 SCRIPT INITIALIZATION & SETUP
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -83,14 +83,13 @@ if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
             exit 1
         fi
     done
-    # Validate that RECYCLE_BIN_DIR is a relative path
     if [[ "${RECYCLE_BIN_DIR}" == /* ]]; then
         echo "❌ FATAL: RECYCLE_BIN_DIR must be a relative path, not absolute: '${RECYCLE_BIN_DIR}'" >&2
         exit 1
     fi
 fi
 # =================================================================
-#                 SCRIPT CONFIGURATION (STATIC)
+#               SCRIPT CONFIGURATION (STATIC)
 # =================================================================
 REMOTE_TARGET="${BOX_ADDR}:${BOX_DIR}"
 LOCK_FILE="/tmp/backup_rsync.lock"
@@ -445,7 +444,7 @@ trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_F
 REQUIRED_CMDS=(rsync ssh curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename read)
 
 # =================================================================
-#                      SCRIPT EXECUTION
+#                       SCRIPT EXECUTION
 # =================================================================
 
 VERBOSE_MODE=false
