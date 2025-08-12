@@ -20,7 +20,7 @@
 # NTFY_PRIORITY_WARNING=4
 # NTFY_PRIORITY_FAILURE=5
 # BEGIN_SSH_OPTS
-# -i 
+# -i
 # /root/.ssh/id_rsa
 # -p22
 # END_SSH_OPTS
@@ -117,9 +117,11 @@ if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
         exit 1
     fi
 fi
+
 # =================================================================
 #               SCRIPT CONFIGURATION (STATIC)
 # =================================================================
+
 REMOTE_TARGET="${BOX_ADDR}:${BOX_DIR}"
 LOCK_FILE="/tmp/backup_rsync.lock"
 
@@ -142,6 +144,7 @@ fi
 # =================================================================
 #                       HELPER FUNCTIONS
 # =================================================================
+
 log_message() {
     local message="$1"
     echo "[$HOSTNAME] [$(date '+%Y-%m-%d %H:%M:%S')] $message" >> "${LOG_FILE:-/dev/null}"
@@ -201,7 +204,7 @@ format_backup_stats() {
     if [[ -z "$bytes_transferred" && -z "$files_transferred" ]]; then
         log_message "WARNING: Unable to parse rsync stats. Output format may be incompatible."
         printf "Data Transferred: Unknown\nFiles Updated: Unknown\nFiles Created: Unknown\nFiles Deleted: Unknown\n"
-        return 1
+        return 0
     fi
     local files_updated=$(( ${files_transferred:-0} - ${files_created:-0} ))
     if (( files_updated < 0 )); then files_updated=0; fi
@@ -233,6 +236,7 @@ run_preflight_checks() {
         if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
     fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
+    
     if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
         ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" \
             "[ -d \"${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}\" ] || mkdir -p \"${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}\"" 2>> "${LOG_FILE:-/dev/null}" || {
@@ -240,6 +244,7 @@ run_preflight_checks() {
             exit 1
         }
     fi
+
     if [[ "$mode" != "restore" ]]; then
         if [[ "$test_mode" == "true" ]]; then echo "--- Checking backup directories..."; fi
         local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
@@ -562,6 +567,8 @@ run_preflight_checks
 exec 200>"$LOCK_FILE"
 flock -n 200 || { echo "Another instance is running, exiting."; exit 5; }
 
+# --- Log Rotation ---
+# Use default of 10MB if not set in config
 local max_log_size_bytes=$(( ${MAX_LOG_SIZE_MB:-10} * 1024 * 1024 ))
 if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$max_log_size_bytes" ]; then
     mv "$LOG_FILE" "${LOG_FILE}.$(date +%Y%m%d_%H%M%S)"
