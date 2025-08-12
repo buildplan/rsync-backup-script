@@ -569,7 +569,7 @@ flock -n 200 || { echo "Another instance is running, exiting."; exit 5; }
 
 # --- Log Rotation ---
 # Use default of 10MB if not set in config
-local max_log_size_bytes=$(( ${MAX_LOG_SIZE_MB:-10} * 1024 * 1024 ))
+max_log_size_bytes=$(( ${MAX_LOG_SIZE_MB:-10} * 1024 * 1024 ))
 if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$max_log_size_bytes" ]; then
     mv "$LOG_FILE" "${LOG_FILE}.$(date +%Y%m%d_%H%M%S)"
     touch "$LOG_FILE"
