@@ -240,6 +240,8 @@ run_restore_mode() {
     local full_remote_source=""
     local default_local_dest=""
     local item_for_display=""
+    local restore_path="" 
+    local is_full_directory_restore=false
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
         echo "--- Browse Recycle Bin ---"
         local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
@@ -258,11 +260,12 @@ run_restore_mode() {
         done
         local remote_date_path="${remote_recycle_path}/${date_choice}"
         echo "--- Files available from ${date_choice} (showing first 20) ---"
-        ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "find \"${remote_date_path}\" -mindepth 1" 2>/dev/null | sed "s#^${remote_date_path}/##" | head -n 20 || echo "No files found for this date."
+        local remote_listing_source="${HETZNER_BOX}:${remote_date_path}/"
+        rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" . 2>/dev/null | head -n 20 || echo "No files found for this date."
         echo "--------------------------------------------------------"
         local specific_path
         read -p "Enter the full original path of the item to restore (e.g., home/user/file.txt): " specific_path
-        specific_path=$(echo "$specific_path" | sed 's#^/##')
+        specific_path=$(echo "$specific_path" | sed 's#^/##') 
         if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
         full_remote_source="${HETZNER_BOX}:${remote_date_path}/${specific_path}"
         default_local_dest="/${specific_path}"
@@ -271,13 +274,13 @@ run_restore_mode() {
         echo "Restore cancelled."
         return 0
     else
-        local restore_path=""
         item_for_display="the entire directory '${dir_choice}'"
         while true; do
             local choice_prompt=$'\nRestore the entire directory or a specific file/subfolder? [entire/specific]: '
             read -p "$choice_prompt" choice
             case "$choice" in
                 entire)
+                    is_full_directory_restore=true
                     break
                     ;;
                 specific)
@@ -317,7 +320,7 @@ run_restore_mode() {
             echo "ℹ️  Home directory detected. Restored files will be owned by '${dest_user}'."
             extra_rsync_opts+=("--chown=${dest_user}:${dest_user}")
         else
-            dest_user=""
+            dest_user="" 
         fi
     fi
     local dest_created=false
@@ -337,7 +340,7 @@ run_restore_mode() {
         local warning_msg="⚠️ WARNING: The custom destination directory '$final_dest' already exists. Files may be overwritten."
         echo "$warning_msg"; log_message "$warning_msg"
     fi
-    if [[ "$dest_created" == "true" && -z "$restore_path" ]]; then
+    if [[ "$dest_created" == "true" && "${is_full_directory_restore:-false}" == "true" ]]; then
         chmod 700 "$final_dest"; log_message "Set permissions to 700 on newly created restore directory: $final_dest"
     fi
     echo "Restore destination is set to: $final_dest"
