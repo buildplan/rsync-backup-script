@@ -184,7 +184,7 @@ To run the backup automatically, edit the root crontab.
 
 ```ini
 # =================================================================
-#         Configuration for rsync Backup Script v0.25
+#         Configuration for rsync Backup Script v0.27
 # =================================================================
 # !! IMPORTANT !! Set file permissions to 600 (chmod 600 backup.conf)
 
