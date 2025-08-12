@@ -166,6 +166,11 @@ format_backup_stats() {
         files_created=$(parse_stat "$rsync_output" 'Number of created files:' '{s+=$5} END {print s}')
         files_deleted=$(parse_stat "$rsync_output" 'Number of deleted files:' '{s+=$5} END {print s}')
     fi
+    if [[ -z "$bytes_transferred" && -z "$files_transferred" ]]; then
+        log_message "WARNING: Unable to parse rsync stats. Output format may be incompatible."
+        printf "Data Transferred: Unknown\nFiles Updated: Unknown\nFiles Created: Unknown\nFiles Deleted: Unknown\n"
+        return 1
+    fi
     local files_updated=$(( ${files_transferred:-0} - ${files_created:-0} ))
     if (( files_updated < 0 )); then files_updated=0; fi
     local stats_summary=""
@@ -196,6 +201,13 @@ run_preflight_checks() {
         if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
     fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
+    if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
+        ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" \
+            "[ -d \"${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}\" ] || mkdir -p \"${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}\"" 2>> "${LOG_FILE:-/dev/null}" || {
+            echo "❌ FATAL: Cannot access or create recycle bin directory '${BOX_DIR}/${RECYCLE_BIN_DIR}' on remote." >&2
+            exit 1
+        }
+    fi
     if [[ "$mode" != "restore" ]]; then
         if [[ "$test_mode" == "true" ]]; then echo "--- Checking backup directories..."; fi
         local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
