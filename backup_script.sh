@@ -2,7 +2,7 @@
 # ===================== v0.25 - 2025.08.12 ========================
 #
 # =================================================================
-#                 SCRIPT INITIALIZATION & SETUP
+#                         SCRIPT INITIALIZATION & SETUP
 # =================================================================
 set -Euo pipefail
 umask 077
@@ -50,7 +50,8 @@ if [ -f "$CONFIG_FILE" ]; then
             value="${value%\"}"; value="${value#\"}"
 
             case "$key" in
-                BACKUP_DIRS|BOX_DIR|HETZNER_BOX|LOG_FILE|LOG_RETENTION_DAYS|\
+                BACKUP_DIRS|BOX_DIR|BOX_ADDR|LOG_FILE|LOG_RETENTION_DAYS|\
+                MAX_LOG_SIZE_MB|BANDWIDTH_LIMIT_KBPS|\
                 NTFY_ENABLED|DISCORD_ENABLED|NTFY_TOKEN|NTFY_URL|DISCORD_WEBHOOK_URL|\
                 NTFY_PRIORITY_SUCCESS|NTFY_PRIORITY_WARNING|NTFY_PRIORITY_FAILURE|\
                 RECYCLE_BIN_ENABLED|RECYCLE_BIN_DIR|RECYCLE_BIN_RETENTION_DAYS)
@@ -67,7 +68,7 @@ else
 fi
 
 # --- Validate that all required configuration variables are set ---
-for var in BACKUP_DIRS BOX_DIR HETZNER_BOX LOG_FILE \
+for var in BACKUP_DIRS BOX_DIR BOX_ADDR LOG_FILE \
            NTFY_PRIORITY_SUCCESS NTFY_PRIORITY_WARNING NTFY_PRIORITY_FAILURE \
            LOG_RETENTION_DAYS; do
     if [ -z "${!var:-}" ]; then
@@ -82,13 +83,17 @@ if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
             exit 1
         fi
     done
+    # Validate that RECYCLE_BIN_DIR is a relative path
+    if [[ "${RECYCLE_BIN_DIR}" == /* ]]; then
+        echo "❌ FATAL: RECYCLE_BIN_DIR must be a relative path, not absolute: '${RECYCLE_BIN_DIR}'" >&2
+        exit 1
+    fi
 fi
 # =================================================================
-#               SCRIPT CONFIGURATION (STATIC)
+#                 SCRIPT CONFIGURATION (STATIC)
 # =================================================================
-REMOTE_TARGET="${HETZNER_BOX}:${BOX_DIR}"
+REMOTE_TARGET="${BOX_ADDR}:${BOX_DIR}"
 LOCK_FILE="/tmp/backup_rsync.lock"
-MAX_LOG_SIZE=10485760 # 10 MB in bytes
 
 SSH_CMD="ssh"
 if (( ${#SSH_OPTS_ARRAY[@]} > 0 )); then
@@ -100,6 +105,11 @@ RSYNC_BASE_OPTS=(
     --exclude-from="$EXCLUDE_FILE_TMP"
     -e "$SSH_CMD"
 )
+
+# Optional: Add bandwidth limit if configured
+if [[ -n "${BANDWIDTH_LIMIT_KBPS:-}" && "${BANDWIDTH_LIMIT_KBPS}" -gt 0 ]]; then
+    RSYNC_BASE_OPTS+=(--bwlimit="$BANDWIDTH_LIMIT_KBPS")
+fi
 
 # =================================================================
 #                       HELPER FUNCTIONS
@@ -182,8 +192,8 @@ run_preflight_checks() {
     if [[ "$check_failed" == "true" ]]; then exit 10; fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ All required commands are present."; fi
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking SSH connectivity..."; fi
-    if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$HETZNER_BOX" 'exit' 2>/dev/null; then
-        local err_msg="Unable to SSH into $HETZNER_BOX. Check keys and connectivity."
+    if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" 'exit' 2>/dev/null; then
+        local err_msg="Unable to SSH into $BOX_ADDR. Check keys and connectivity."
         if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
     fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
@@ -247,7 +257,7 @@ run_restore_mode() {
         local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
         local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -n)
         local date_folders
-        date_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "ls -1 \"$remote_recycle_path\"" 2>/dev/null) || true
+        date_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null) || true
         if [[ -z "$date_folders" ]]; then
             echo "❌ No dated folders found in the recycle bin. Nothing to restore." >&2
             return 1
@@ -260,14 +270,21 @@ run_restore_mode() {
         done
         local remote_date_path="${remote_recycle_path}/${date_choice}"
         echo "--- Files available from ${date_choice} (showing first 20) ---"
-        local remote_listing_source="${HETZNER_BOX}:${remote_date_path}/"
+        local remote_listing_source="${BOX_ADDR}:${remote_date_path}/"
         rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" . 2>/dev/null | head -n 20 || echo "No files found for this date."
         echo "--------------------------------------------------------"
         local specific_path
         read -p "Enter the full original path of the item to restore (e.g., home/user/file.txt): " specific_path
         specific_path=$(echo "$specific_path" | sed 's#^/##')
         if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
-        full_remote_source="${HETZNER_BOX}:${remote_date_path}/${specific_path}"
+        
+        full_remote_source="${BOX_ADDR}:${remote_date_path}/${specific_path}"
+        
+        if ! rsync -r -n -e "$SSH_CMD" "$full_remote_source" . >/dev/null 2>&1; then
+            echo "❌ ERROR: The path '${specific_path}' was not found in the recycle bin for ${date_choice}. Aborting." >&2
+            return 1
+        fi
+
         default_local_dest="/${specific_path}"
         item_for_display="(from Recycle Bin) '${specific_path}'"
     elif [[ "$dir_choice" == "Cancel" ]]; then 
@@ -382,7 +399,7 @@ run_recycle_bin_cleanup() {
     local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -n)
     local list_command="ls -1 \"$remote_cleanup_path\""
     local all_folders
-    all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
+    all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$BOX_ADDR" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
         log_message "Recycle bin not found or unable to list contents. Nothing to clean."
         return 0
     }
@@ -412,8 +429,8 @@ run_recycle_bin_cleanup() {
             if [[ -n "$folder" ]]; then
                 log_message "  Deleting: $folder"
                 local remote_dir_to_delete="${remote_cleanup_path}/${folder}/"
-                rsync -a --delete -e "$SSH_CMD" "$empty_dir/" "${HETZNER_BOX}:${remote_dir_to_delete}" >/dev/null 2>> "${LOG_FILE:-/dev/null}"                
-                ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "rmdir \"$remote_dir_to_delete\"" 2>> "${LOG_FILE:-/dev/null}"
+                rsync -a --delete -e "$SSH_CMD" "$empty_dir/" "${BOX_ADDR}:${remote_dir_to_delete}" >/dev/null 2>> "${LOG_FILE:-/dev/null}"               
+                ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$BOX_ADDR" "rmdir \"$remote_dir_to_delete\"" 2>> "${LOG_FILE:-/dev/null}"
             fi
         done <<< "$folders_to_delete"
 
@@ -422,14 +439,13 @@ run_recycle_bin_cleanup() {
         log_message "No old recycle bin folders to remove."
     fi
 }
-
 trap cleanup EXIT
 trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
 REQUIRED_CMDS=(rsync ssh curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename read)
 
 # =================================================================
-#                       SCRIPT EXECUTION
+#                      SCRIPT EXECUTION
 # =================================================================
 
 VERBOSE_MODE=false
@@ -461,7 +477,7 @@ if [[ "${1:-}" ]]; then
             BACKUP_STATS=$(format_backup_stats "$full_dry_run_output")
             echo -e "$BACKUP_STATS"; echo "-------------------------------"
             if [[ "$DRY_RUN_FAILED" == "true" ]]; then
-                 echo -e "\n❌ Dry run FAILED for one or more directories. See rsync errors above."; exit 1
+                echo -e "\n❌ Dry run FAILED for one or more directories. See rsync errors above."; exit 1
             fi
             echo "--- DRY RUN COMPLETED ---"; exit 0 ;;
         --checksum | --summary)
@@ -503,7 +519,8 @@ run_preflight_checks
 exec 200>"$LOCK_FILE"
 flock -n 200 || { echo "Another instance is running, exiting."; exit 5; }
 
-if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$MAX_LOG_SIZE" ]; then
+local max_log_size_bytes=$(( ${MAX_LOG_SIZE_MB:-10} * 1024 * 1024 ))
+if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$max_log_size_bytes" ]; then
     mv "$LOG_FILE" "${LOG_FILE}.$(date +%Y%m%d_%H%M%S)"
     touch "$LOG_FILE"
     find "$(dirname "$LOG_FILE")" -name "$(basename "$LOG_FILE").*" -type f -mtime +"$LOG_RETENTION_DAYS" -delete
@@ -533,10 +550,10 @@ for dir in "${DIRS_ARRAY[@]}"; do
     fi
     cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"; full_rsync_output+=$'\n'"$(<"$RSYNC_LOG_TMP")"
     rm -f "$RSYNC_LOG_TMP"
-    if [[ $RSYNC_EXIT_CODE -eq 0 || $RSYNC_EXIT_CODE -eq 24 ]]; then
+    if [[ $RSYNC_EXIT_CODE -eq 0 || $RSYNC_EXIT_CODE -eq 24 || $RSYNC_EXIT_CODE -eq 23 ]]; then
         success_dirs+=("$(basename "$dir")")
-        if [[ $RSYNC_EXIT_CODE -eq 24 ]]; then
-            log_message "WARNING for $dir: rsync completed with code 24."; overall_exit_code=24
+        if [[ $RSYNC_EXIT_CODE -eq 24 || $RSYNC_EXIT_CODE -eq 23 ]]; then
+            log_message "WARNING for $dir: rsync completed with code $RSYNC_EXIT_CODE."; overall_exit_code=24
         fi
     else
         failed_dirs+=("$(basename "$dir")")
@@ -549,18 +566,21 @@ run_recycle_bin_cleanup
 END_TIME=$(date +%s); DURATION=$((END_TIME - START_TIME)); trap - ERR
 
 BACKUP_STATS=$(format_backup_stats "$full_rsync_output")
-FINAL_MESSAGE=$(printf "%s\n\nDuration: %dm %ds" "$BACKUP_STATS" $((DURATION / 60)) $((DURATION % 60)))
+FINAL_MESSAGE=$(printf "%s\n\nSuccessful: %s\nFailed: %s\n\nDuration: %dm %ds" \
+    "$BACKUP_STATS" \
+    "${success_dirs[*]:-None}" \
+    "${failed_dirs[*]:-None}" \
+    $((DURATION / 60)) $((DURATION % 60)))
+
 if [[ ${#failed_dirs[@]} -eq 0 ]]; then
     log_message "SUCCESS: All backups completed."
     if [[ $overall_exit_code -eq 24 ]]; then
-        send_notification "⚠️ Backup Warning: ${HOSTNAME}" "warning" "${NTFY_PRIORITY_WARNING}" "warning" "$FINAL_MESSAGE"
+        send_notification "⚠️ Backup Warning: ${HOSTNAME}" "warning" "${NTFY_PRIORITY_WARNING}" "warning" "One or more directories completed with warnings.\n\n$FINAL_MESSAGE"
     else
         send_notification "✅ Backup SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "$FINAL_MESSAGE"
     fi
 else
-    printf -v FAIL_MSG "One or more backups failed.\n\nSuccessful: %s\nFailed: %s\n\n%s" \
-        "${success_dirs[*]:-None}" "${failed_dirs[*]}" "$FINAL_MESSAGE"
-    log_message "FAILURE: One or more backups failed."; send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$FAIL_MSG"
+    log_message "FAILURE: One or more backups failed."; send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$FINAL_MESSAGE"
 fi
 
 echo "======================= Run Finished =======================" >> "$LOG_FILE"
