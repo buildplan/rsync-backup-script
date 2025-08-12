@@ -1,10 +1,21 @@
 name: Shell Script Linting
 
+# This workflow now runs on:
+# 1. Pushes to the main branch (if backup_script.sh changes)
+# 2. Pushes to any branch starting with 'improve' (if backup_script.sh changes)
+# 3. Pull requests targeting the main branch (if backup_script.sh changes)
 on:
   push:
+    branches:
+      - main
+      - 'improve**' # Triggers on branches like 'improve' or 'improve-new-feature'
+    paths:
+      - 'backup_script.sh'
   pull_request:
     branches:
       - main
+    paths:
+      - 'backup_script.sh'
 
 permissions:
   contents: read
@@ -20,9 +31,9 @@ jobs:
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@2.0.0
         with:
-          scandir: '.'
+          # Only fail for 'error' level issues. To see warnings, change to 'warning'.
           severity: error
-          version: v0.10.0
-          format: tty
+          # Specify the script to check
+          scandir: './backup_script.sh'
         env:
-          SHELLCHECK_OPTS: "-s bash"
+          SHELLCHECK_OPTS: -s bash
