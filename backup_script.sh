@@ -20,8 +20,9 @@
 # NTFY_PRIORITY_WARNING=4
 # NTFY_PRIORITY_FAILURE=5
 # BEGIN_SSH_OPTS
-# -i /root/.ssh/id_rsa
-# -p 22
+# -i 
+# /root/.ssh/id_rsa
+# -p22
 # END_SSH_OPTS
 # BEGIN_EXCLUDES
 # *.tmp
