@@ -238,11 +238,16 @@ run_preflight_checks() {
     if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
     
     if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
-        ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" \
-            "[ -d \"${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}\" ] || mkdir -p \"${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}\"" 2>> "${LOG_FILE:-/dev/null}" || {
-            echo "❌ FATAL: Cannot access or create recycle bin directory '${BOX_DIR}/${RECYCLE_BIN_DIR}' on remote." >&2
-            exit 1
-        }
+        local remote_recycle_path="${BOX_DIR}${RECYCLE_BIN_DIR}"
+        # Use 'ls -d' for maximum compatibility with restricted shells, hiding all output.
+        if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" "ls -d \"$remote_recycle_path\"" >/dev/null 2>&1; then
+            # If it doesn't exist, try to create it.
+            if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" "mkdir -p \"$remote_recycle_path\"" >/dev/null 2>&1; then
+                # If creating it also fails, then exit with an error.
+                echo "❌ FATAL: Cannot access or create recycle bin directory '$remote_recycle_path' on remote." >&2
+                exit 1
+            fi
+        fi
     fi
 
     if [[ "$mode" != "restore" ]]; then
