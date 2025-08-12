@@ -736,13 +736,11 @@ run_recycle_bin_cleanup() {
     local threshold_timestamp
     threshold_timestamp=$(date -d "$retention_days days ago" +%s)
     while IFS= read -r folder; do
-        if [[ "$folder" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-            local folder_timestamp
-            folder_timestamp=$(date -d "$folder" +%s)
-            if (( folder_timestamp < threshold_timestamp )); then
-                folders_to_delete+="${folder}"$'\n'
-            fi
-        fi
+	if [[ "$folder" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && folder_timestamp=$(date -d "$folder" +%s 2>/dev/null); then
+	    if (( folder_timestamp < threshold_timestamp )); then
+        	folders_to_delete+="${folder}"$'\n'
+    	    fi
+	fi
     done <<< "$all_folders"
     if [[ -n "$folders_to_delete" ]]; then
         log_message "Removing old recycle bin folders:"
