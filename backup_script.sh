@@ -143,7 +143,10 @@ send_notification() {
     send_discord "$title" "$discord_status" "$message"
 }
 run_integrity_check() {
-    local rsync_check_opts=(-aincR -c --delete --mkpath --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "$SSH_CMD")
+    local rsync_check_opts=(-aincR --delete --mkpath --exclude-from="$EXCLUDE_FILE_TMP" --out-format="%n" -e "$SSH_CMD")
+    if [[ "${CHECKSUM_ENABLED:-false}" == "true" ]]; then
+        rsync_check_opts+=(-c)
+    fi
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
     for dir in "${DIRS_ARRAY[@]}"; do
         echo "--- Integrity Check: $dir ---" >&2
