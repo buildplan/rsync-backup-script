@@ -226,44 +226,83 @@ run_restore_mode() {
     echo "--- RESTORE MODE ACTIVATED ---"
     run_preflight_checks "restore"
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
+    local RECYCLE_OPTION="[ Restore from Recycle Bin ]"
+    local all_options=("${DIRS_ARRAY[@]}")
+    if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
+        all_options+=("$RECYCLE_OPTION")
+    fi
+    all_options+=("Cancel")
     echo "Available backup sets to restore from:"
-    select dir_choice in "${DIRS_ARRAY[@]}" "Cancel"; do
-        if [[ "$dir_choice" == "Cancel" ]]; then echo "Restore cancelled."; return 0;
-        elif [[ -n "$dir_choice" ]]; then break;
+    select dir_choice in "${all_options[@]}"; do
+        if [[ -n "$dir_choice" ]]; then break;
         else echo "Invalid selection. Please try again."; fi
     done
-    local restore_path=""
-    local item_for_display="the entire directory"
-    while true; do
-        local choice_prompt=$'\nRestore the entire directory or a specific file/subfolder? [entire/specific]: '
-        read -p "$choice_prompt" choice
-        case "$choice" in
-            entire)
-                break
-                ;;
-            specific)
-                local specific_path_prompt
-                printf -v specific_path_prompt "Enter the path relative to '%s' to restore: " "$dir_choice"
-                read -ep "$specific_path_prompt" specific_path
-                specific_path=$(echo "$specific_path" | sed 's#^/##')
-                if [[ -n "$specific_path" ]]; then
-                    restore_path="$specific_path"
-                    item_for_display="'$restore_path'"
-                    break
-                else
-                    echo "Path cannot be empty. Please try again or choose 'entire'."
-                fi
-                ;;
-            *) echo "Invalid choice. Please answer 'entire' or 'specific'." ;;
-        esac
-    done
-    local relative_path="${dir_choice#*./}"
-    local full_remote_source="${REMOTE_TARGET}${relative_path}${restore_path}"
-    local default_local_dest
-    if [[ -n "$restore_path" ]]; then
-        default_local_dest=$(echo "${dir_choice}${restore_path}" | sed 's#/\./#/#')
+    local full_remote_source=""
+    local default_local_dest=""
+    local item_for_display=""
+    if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
+        echo "--- Browse Recycle Bin ---"
+        local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
+        local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -n)
+        local date_folders
+        date_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "ls -1 \"$remote_recycle_path\"" 2>/dev/null) || true
+        if [[ -z "$date_folders" ]]; then
+            echo "❌ No dated folders found in the recycle bin. Nothing to restore." >&2
+            return 1
+        fi
+        echo "Select a date to browse:"
+        select date_choice in $date_folders "Cancel"; do
+            if [[ "$date_choice" == "Cancel" ]]; then echo "Restore cancelled."; return 0;
+            elif [[ -n "$date_choice" ]]; then break;
+            else echo "Invalid selection. Please try again."; fi
+        done
+        local remote_date_path="${remote_recycle_path}/${date_choice}"
+        echo "--- Files available from ${date_choice} (showing first 20) ---"
+        ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$HETZNER_BOX" "find \"${remote_date_path}\" -mindepth 1" 2>/dev/null | sed "s#^${remote_date_path}/##" | head -n 20 || echo "No files found for this date."
+        echo "--------------------------------------------------------"
+        local specific_path
+        read -p "Enter the full original path of the item to restore (e.g., home/user/file.txt): " specific_path
+        specific_path=$(echo "$specific_path" | sed 's#^/##')
+        if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
+        full_remote_source="${HETZNER_BOX}:${remote_date_path}/${specific_path}"
+        default_local_dest="/${specific_path}"
+        item_for_display="(from Recycle Bin) '${specific_path}'"
+    elif [[ "$dir_choice" == "Cancel" ]]; then 
+        echo "Restore cancelled."
+        return 0
     else
-        default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#')
+        local restore_path=""
+        item_for_display="the entire directory '${dir_choice}'"
+        while true; do
+            local choice_prompt=$'\nRestore the entire directory or a specific file/subfolder? [entire/specific]: '
+            read -p "$choice_prompt" choice
+            case "$choice" in
+                entire)
+                    break
+                    ;;
+                specific)
+                    local specific_path_prompt
+                    printf -v specific_path_prompt "Enter the path relative to '%s' to restore: " "$dir_choice"
+                    read -ep "$specific_path_prompt" specific_path
+                    specific_path=$(echo "$specific_path" | sed 's#^/##')
+                    if [[ -n "$specific_path" ]]; then
+                        restore_path="$specific_path"
+                        item_for_display="'$restore_path' from '${dir_choice}'"
+                        break
+                    else
+                        echo "Path cannot be empty. Please try again or choose 'entire'."
+                    fi
+                    ;;
+                *) echo "Invalid choice. Please answer 'entire' or 'specific'." ;;
+            esac
+        done
+        local relative_path="${dir_choice#*./}"
+        full_remote_source="${REMOTE_TARGET}${relative_path}${restore_path}"
+        if [[ -n "$restore_path" ]]; then
+            default_local_dest=$(echo "${dir_choice}${restore_path}" | sed 's#/\./#/#')
+        else
+            default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#')
+        fi
     fi
     local final_dest
     local dest_prompt
