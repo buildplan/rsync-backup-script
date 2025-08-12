@@ -265,7 +265,7 @@ run_restore_mode() {
         echo "--------------------------------------------------------"
         local specific_path
         read -p "Enter the full original path of the item to restore (e.g., home/user/file.txt): " specific_path
-        specific_path=$(echo "$specific_path" | sed 's#^/##') 
+        specific_path=$(echo "$specific_path" | sed 's#^/##')
         if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
         full_remote_source="${HETZNER_BOX}:${remote_date_path}/${specific_path}"
         default_local_dest="/${specific_path}"
@@ -320,7 +320,7 @@ run_restore_mode() {
             echo "ℹ️  Home directory detected. Restored files will be owned by '${dest_user}'."
             extra_rsync_opts+=("--chown=${dest_user}:${dest_user}")
         else
-            dest_user="" 
+            dest_user=""
         fi
     fi
     local dest_created=false
