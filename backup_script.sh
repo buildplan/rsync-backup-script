@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.27 - 2025.08.12 ========================
+# ===================== v0.28 - 2025.08.12 ========================
 #
 # Example backup.conf:
 # BACKUP_DIRS="/home/user/test/./ /var/www/./"
@@ -118,6 +118,10 @@ if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
     done
     if [[ "${RECYCLE_BIN_DIR}" == /* ]]; then
         echo "❌ FATAL: RECYCLE_BIN_DIR must be a relative path, not absolute: '${RECYCLE_BIN_DIR}'" >&2
+        exit 1
+    fi
+    if [[ "$RECYCLE_BIN_DIR" == *"../"* ]]; then
+        echo "❌ FATAL: RECYCLE_BIN_DIR cannot contain '../'" >&2
         exit 1
     fi
 fi
@@ -470,7 +474,8 @@ run_recycle_bin_cleanup() {
     local threshold_timestamp
     threshold_timestamp=$(date -d "$retention_days days ago" +%s)
     while IFS= read -r folder; do
-        if [[ "$folder" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && folder_timestamp=$(date -d "$folder" +%s 2>/dev/null) && [[ -n "$folder_timestamp" ]]; then
+        local folder_date=${folder%%_*}
+        if folder_timestamp=$(date -d "$folder_date" +%s 2>/dev/null) && [[ -n "$folder_timestamp" ]]; then
             if (( folder_timestamp < threshold_timestamp )); then
                 folders_to_delete+="${folder}"$'\n'
             fi
@@ -518,7 +523,7 @@ if [[ "${1:-}" ]]; then
                 echo -e "\n--- Checking dry run for: $dir ---"
                 rsync_dry_opts=( "${RSYNC_BASE_OPTS[@]}" --dry-run --itemize-changes --out-format="%i %n%L" --info=stats2,name,flist2 )
                 if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
-                    backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
+                    backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F_%H%M%S)/"
                     rsync_dry_opts+=(--backup --backup-dir="$backup_dir")
                 fi
                 DRY_RUN_LOG_TMP=$(mktemp)
@@ -597,7 +602,7 @@ for dir in "${DIRS_ARRAY[@]}"; do
     RSYNC_LOG_TMP=$(mktemp)
     RSYNC_EXIT_CODE=0; RSYNC_OPTS=("${RSYNC_BASE_OPTS[@]}")
     if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
-        backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F)/"
+        backup_dir="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}/$(date +%F_%H%M%S)/"
         RSYNC_OPTS+=(--backup --backup-dir="$backup_dir")
     fi
     if [[ "$VERBOSE_MODE" == "true" ]]; then
