@@ -236,20 +236,15 @@ run_preflight_checks() {
         if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
     fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
-    
     if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
         local remote_recycle_path="${BOX_DIR}${RECYCLE_BIN_DIR}"
-        # Use 'ls -d' for maximum compatibility with restricted shells, hiding all output.
         if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" "ls -d \"$remote_recycle_path\"" >/dev/null 2>&1; then
-            # If it doesn't exist, try to create it.
             if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" "mkdir -p \"$remote_recycle_path\"" >/dev/null 2>&1; then
-                # If creating it also fails, then exit with an error.
                 echo "❌ FATAL: Cannot access or create recycle bin directory '$remote_recycle_path' on remote." >&2
                 exit 1
             fi
         fi
     fi
-
     if [[ "$mode" != "restore" ]]; then
         if [[ "$test_mode" == "true" ]]; then echo "--- Checking backup directories..."; fi
         local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
