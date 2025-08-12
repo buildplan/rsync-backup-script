@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.26 - 2025.08.12 ========================
+# ===================== v0.27 - 2025.08.12 ========================
 #
 # Example backup.conf:
 # BACKUP_DIRS="/home/user/test/./ /var/www/./"
@@ -145,6 +145,14 @@ if [[ -n "${BANDWIDTH_LIMIT_KBPS:-}" && "${BANDWIDTH_LIMIT_KBPS}" -gt 0 ]]; then
     RSYNC_BASE_OPTS+=(--bwlimit="$BANDWIDTH_LIMIT_KBPS")
 fi
 
+# Shared options for direct, non-interactive SSH commands
+SSH_DIRECT_OPTS=(
+    -o StrictHostKeyChecking=no
+    -o BatchMode=yes
+    -o ConnectTimeout=30
+    -n
+)
+
 # =================================================================
 #                       HELPER FUNCTIONS
 # =================================================================
@@ -235,6 +243,8 @@ run_preflight_checks() {
     if [[ "$check_failed" == "true" ]]; then exit 10; fi
     if [[ "$test_mode" == "true" ]]; then echo "✅ All required commands are present."; fi
     if [[ "$test_mode" == "true" ]]; then echo "--- Checking SSH connectivity..."; fi
+
+    # Quick preflight connectivity "ping": short 10s timeout for fail-fast behaviour
     if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" 'exit' 2>/dev/null; then
         local err_msg="Unable to SSH into $BOX_ADDR. Check keys and connectivity."
         if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
@@ -307,9 +317,8 @@ run_restore_mode() {
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
         echo "--- Browse Recycle Bin ---"
         local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
-        local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -n)
         local date_folders
-        date_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null) || true
+        date_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null) || true
         if [[ -z "$date_folders" ]]; then
             echo "❌ No dated folders found in the recycle bin. Nothing to restore." >&2
             return 1
@@ -445,10 +454,9 @@ run_recycle_bin_cleanup() {
     if [[ "${RECYCLE_BIN_ENABLED:-false}" != "true" ]]; then return 0; fi
     log_message "Checking remote recycle bin..."
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
-    local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -n)
     local list_command="ls -1 \"$remote_cleanup_path\""
     local all_folders
-    all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$BOX_ADDR" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
+    all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
         log_message "Recycle bin not found or unable to list contents. Nothing to clean."
         return 0
     }
@@ -462,11 +470,11 @@ run_recycle_bin_cleanup() {
     local threshold_timestamp
     threshold_timestamp=$(date -d "$retention_days days ago" +%s)
     while IFS= read -r folder; do
-	if [[ "$folder" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && folder_timestamp=$(date -d "$folder" +%s 2>/dev/null); then
-	    if (( folder_timestamp < threshold_timestamp )); then
-        	folders_to_delete+="${folder}"$'\n'
-    	    fi
-	fi
+        if [[ "$folder" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && folder_timestamp=$(date -d "$folder" +%s 2>/dev/null) && [[ -n "$folder_timestamp" ]]; then
+            if (( folder_timestamp < threshold_timestamp )); then
+                folders_to_delete+="${folder}"$'\n'
+            fi
+        fi
     done <<< "$all_folders"
     if [[ -n "$folders_to_delete" ]]; then
         log_message "Removing old recycle bin folders:"
@@ -476,8 +484,8 @@ run_recycle_bin_cleanup() {
             if [[ -n "$folder" ]]; then
                 log_message "  Deleting: $folder"
                 local remote_dir_to_delete="${remote_cleanup_path}/${folder}/"
-                rsync -a --delete -e "$SSH_CMD" "$empty_dir/" "${BOX_ADDR}:${remote_dir_to_delete}" >/dev/null 2>> "${LOG_FILE:-/dev/null}"               
-                ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$BOX_ADDR" "rmdir \"$remote_dir_to_delete\"" 2>> "${LOG_FILE:-/dev/null}"
+                rsync -a --delete -e "$SSH_CMD" "$empty_dir/" "${BOX_ADDR}:${remote_dir_to_delete}" >/dev/null 2>> "${LOG_FILE:-/dev/null}"
+                ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "rmdir \"$remote_dir_to_delete\"" 2>> "${LOG_FILE:-/dev/null}"
             fi
         done <<< "$folders_to_delete"
 
@@ -574,6 +582,9 @@ if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$max_log_size_bytes" 
     touch "$LOG_FILE"
     find "$(dirname "$LOG_FILE")" -name "$(basename "$LOG_FILE").*" -type f -mtime +"$LOG_RETENTION_DAYS" -delete
 fi
+
+log_message "Flushing filesystem buffers to disk..."
+sync
 
 echo "============================================================" >> "$LOG_FILE"
 log_message "Starting rsync backup..."
