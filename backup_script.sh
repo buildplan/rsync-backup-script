@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.24 - 2025.08.12 ========================
+# ===================== v0.25 - 2025.08.12 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -226,51 +226,110 @@ run_restore_mode() {
     echo "--- RESTORE MODE ACTIVATED ---"
     run_preflight_checks "restore"
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
-    echo "Available backups to restore:"
+    echo "Available backup sets to restore from:"
     select dir_choice in "${DIRS_ARRAY[@]}" "Cancel"; do
         if [[ "$dir_choice" == "Cancel" ]]; then echo "Restore cancelled."; return 0;
         elif [[ -n "$dir_choice" ]]; then break;
         else echo "Invalid selection. Please try again."; fi
     done
+    local restore_path=""
+    local item_for_display="the entire directory"
+    while true; do
+        local choice_prompt=$'\nRestore the entire directory or a specific file/subfolder? [entire/specific]: '
+        read -p "$choice_prompt" choice
+        case "$choice" in
+            entire)
+                break
+                ;;
+            specific)
+                local specific_path_prompt
+                printf -v specific_path_prompt "Enter the path relative to '%s' to restore: " "$dir_choice"
+                read -ep "$specific_path_prompt" specific_path
+                specific_path=$(echo "$specific_path" | sed 's#^/##')
+                if [[ -n "$specific_path" ]]; then
+                    restore_path="$specific_path"
+                    item_for_display="'$restore_path'"
+                    break
+                else
+                    echo "Path cannot be empty. Please try again or choose 'entire'."
+                fi
+                ;;
+            *) echo "Invalid choice. Please answer 'entire' or 'specific'." ;;
+        esac
+    done
     local relative_path="${dir_choice#*./}"
-    local full_remote_source="${REMOTE_TARGET}${relative_path}"
-    local default_local_dest; default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#')
-    local final_dest; read -p $'\nEnter the destination path.\nPress [Enter] to use the original location ('"$default_local_dest"$'): ' final_dest
+    local full_remote_source="${REMOTE_TARGET}${relative_path}${restore_path}"
+    local default_local_dest
+    if [[ -n "$restore_path" ]]; then
+        default_local_dest=$(echo "${dir_choice}${restore_path}" | sed 's#/\./#/#')
+    else
+        default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#')
+    fi
+    local final_dest
+    local dest_prompt
+    printf -v dest_prompt "\nEnter the destination path.\nPress [Enter] to use the original location (%s): " "$default_local_dest"
+    read -p "$dest_prompt" final_dest
     : "${final_dest:=$default_local_dest}"
+    local extra_rsync_opts=()
+    local dest_user=""
+    if [[ "$final_dest" == /home/* ]]; then
+        dest_user=$(echo "$final_dest" | cut -d/ -f3)
+        if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
+            echo "ℹ️  Home directory detected. Restored files will be owned by '${dest_user}'."
+            extra_rsync_opts+=("--chown=${dest_user}:${dest_user}")
+        else
+            dest_user=""
+        fi
+    fi
     local dest_created=false
-    if [[ ! -d "$final_dest" ]]; then dest_created=true; fi
-    if [[ "$final_dest" != "$default_local_dest" && -d "$final_dest" ]]; then
+    if [[ ! -e "$final_dest" ]]; then
+        dest_created=true
+    fi
+    local dest_parent
+    dest_parent=$(dirname "$final_dest")
+    if ! mkdir -p "$dest_parent"; then
+        echo "❌ FATAL: Could not create parent destination directory '$dest_parent'. Aborting." >&2
+        return 1
+    fi
+    if [[ -n "$dest_user" ]]; then
+        chown "${dest_user}:${dest_user}" "$dest_parent"
+    fi
+    if [[ "$final_dest" != "$default_local_dest" && -d "$final_dest" && -z "$restore_path" ]]; then
         local warning_msg="⚠️ WARNING: The custom destination directory '$final_dest' already exists. Files may be overwritten."
         echo "$warning_msg"; log_message "$warning_msg"
     fi
-    if ! mkdir -p "$final_dest"; then echo "❌ FATAL: Could not create destination directory '$final_dest'. Aborting." >&2; return 1; fi
-    if [[ "$dest_created" == "true" ]]; then
+    if [[ "$dest_created" == "true" && -z "$restore_path" ]]; then
         chmod 700 "$final_dest"; log_message "Set permissions to 700 on newly created restore directory: $final_dest"
     fi
     echo "Restore destination is set to: $final_dest"
     echo ""; echo "--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---"
-    log_message "Starting restore dry-run from ${full_remote_source} to ${final_dest}"
+    log_message "Starting restore dry-run of ${item_for_display} from ${full_remote_source} to ${final_dest}"
     local rsync_restore_opts=(-avhi --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "$SSH_CMD")
-    if ! rsync "${rsync_restore_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
+    if ! rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
         echo "❌ DRY RUN FAILED. Rsync reported an error. Aborting." >&2; return 1
     fi
     echo "--- DRY RUN COMPLETE ---"
-    local confirmation; while true; do
-        read -p $'\nAre you sure you want to proceed with restoring files to '"$final_dest"'? [yes/no]: ' confirmation
+    local confirmation
+    while true; do
+        local confirmation_prompt
+        printf -v confirmation_prompt "\nAre you sure you want to proceed with restoring %s to '%s'? [yes/no]: " "$item_for_display" "$final_dest"
+        read -p "$confirmation_prompt" confirmation
         case "$confirmation" in
-            yes) break ;; no) echo "Restore aborted by user." ; return 0 ;; *) echo "Please answer yes or no." ;;
+            yes) break ;;
+            no) echo "Restore aborted by user." ; return 0 ;;
+            *) echo "Please answer yes or no." ;;
         esac
     done
     echo -e "\n--- PROCEEDING WITH RESTORE... ---"
-    log_message "Starting REAL restore from ${full_remote_source} to ${final_dest}"
-    if rsync "${rsync_restore_opts[@]}" "$full_remote_source" "$final_dest"; then
+    log_message "Starting REAL restore of ${item_for_display} from ${full_remote_source} to ${final_dest}"
+    if rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" "$full_remote_source" "$final_dest"; then
         log_message "Restore completed successfully."
-        echo "✅ Restore of '$relative_path' to '$final_dest' completed successfully."
-        send_notification "✅ Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${relative_path} to ${final_dest}"
+        echo "✅ Restore of $item_for_display to '$final_dest' completed successfully."
+        send_notification "✅ Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${item_for_display} to ${final_dest}"
     else
         log_message "Restore FAILED with rsync exit code $?."
         echo "❌ Restore FAILED. Check the rsync output and log for details."
-        send_notification "❌ Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${relative_path} to ${final_dest} failed."
+        send_notification "❌ Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${item_for_display} to ${final_dest} failed."
         return 1
     fi
 }
