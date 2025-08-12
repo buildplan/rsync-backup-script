@@ -1,6 +1,33 @@
 #!/bin/bash
 # ===================== v0.25 - 2025.08.12 ========================
 #
+# Example backup.conf:
+# BACKUP_DIRS="/home/user/test/./ /var/www/./"
+# BOX_DIR="/backup/"
+# BOX_ADDR="user@storagebox.example.com"
+# LOG_FILE="/var/log/backup.log"
+# LOG_RETENTION_DAYS=7
+# MAX_LOG_SIZE_MB=10
+# BANDWIDTH_LIMIT_KBPS=1000
+# RECYCLE_BIN_ENABLED=true
+# RECYCLE_BIN_DIR="recycle_bin"
+# RECYCLE_BIN_RETENTION_DAYS=30
+# CHECKSUM_ENABLED=false
+# NTFY_ENABLED=true
+# NTFY_TOKEN="your_token"
+# NTFY_URL="https://ntfy.sh/your_topic"
+# NTFY_PRIORITY_SUCCESS=3
+# NTFY_PRIORITY_WARNING=4
+# NTFY_PRIORITY_FAILURE=5
+# BEGIN_SSH_OPTS
+# -i /root/.ssh/id_rsa
+# -p 22
+# END_SSH_OPTS
+# BEGIN_EXCLUDES
+# *.tmp
+# /tmp/
+# END_EXCLUDES
+#
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
 # =================================================================
@@ -52,6 +79,7 @@ if [ -f "$CONFIG_FILE" ]; then
             case "$key" in
                 BACKUP_DIRS|BOX_DIR|BOX_ADDR|LOG_FILE|LOG_RETENTION_DAYS|\
                 MAX_LOG_SIZE_MB|BANDWIDTH_LIMIT_KBPS|\
+                CHECKSUM_ENABLED|\
                 NTFY_ENABLED|DISCORD_ENABLED|NTFY_TOKEN|NTFY_URL|DISCORD_WEBHOOK_URL|\
                 NTFY_PRIORITY_SUCCESS|NTFY_PRIORITY_WARNING|NTFY_PRIORITY_FAILURE|\
                 RECYCLE_BIN_ENABLED|RECYCLE_BIN_DIR|RECYCLE_BIN_RETENTION_DAYS)
