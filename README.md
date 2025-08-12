@@ -301,36 +301,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-#!/bin/bash
 # ===================== v0.27 - 2025.08.12 ========================
-#
-# Example backup.conf:
-# BACKUP_DIRS="/home/user/test/./ /var/www/./"
-# BOX_DIR="/backup/"
-# BOX_ADDR="user@storagebox.example.com"
-# LOG_FILE="/var/log/backup.log"
-# LOG_RETENTION_DAYS=7
-# MAX_LOG_SIZE_MB=10
-# BANDWIDTH_LIMIT_KBPS=1000
-# RECYCLE_BIN_ENABLED=true
-# RECYCLE_BIN_DIR="recycle_bin"
-# RECYCLE_BIN_RETENTION_DAYS=30
-# CHECKSUM_ENABLED=false
-# NTFY_ENABLED=true
-# NTFY_TOKEN="your_token"
-# NTFY_URL="https://ntfy.sh/your_topic"
-# NTFY_PRIORITY_SUCCESS=3
-# NTFY_PRIORITY_WARNING=4
-# NTFY_PRIORITY_FAILURE=5
-# BEGIN_SSH_OPTS
-# -i
-# /root/.ssh/id_rsa
-# -p22
-# END_SSH_OPTS
-# BEGIN_EXCLUDES
-# *.tmp
-# /tmp/
-# END_EXCLUDES
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
