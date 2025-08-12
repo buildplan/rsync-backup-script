@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.25 - 2025.08.12 ========================
+# ===================== v0.26 - 2025.08.12 ========================
 #
 # Example backup.conf:
 # BACKUP_DIRS="/home/user/test/./ /var/www/./"
@@ -71,7 +71,7 @@ if [ -f "$CONFIG_FILE" ]; then
             [[ ! "$line" =~ ^([[:space:]]*#|[[:space:]]*$) ]] && SSH_OPTS_ARRAY+=("$line")
             continue
         fi
-        
+
         # --- Process key-value pairs ---
         if [[ "$line" =~ ^[[:space:]]*([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*=[[:space:]]*(.*) ]]; then
             key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
@@ -105,6 +105,10 @@ for var in BACKUP_DIRS BOX_DIR BOX_ADDR LOG_FILE \
         exit 1
     fi
 done
+if [[ "$BOX_DIR" != */ ]]; then
+    echo "❌ FATAL: BOX_DIR must end with a trailing slash (/). Please check backup.conf." >&2
+    exit 2
+fi
 if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
     for var in RECYCLE_BIN_DIR RECYCLE_BIN_RETENTION_DAYS; do
         if [ -z "${!var:-}" ]; then
@@ -298,7 +302,7 @@ run_restore_mode() {
     local full_remote_source=""
     local default_local_dest=""
     local item_for_display=""
-    local restore_path="" 
+    local restore_path=""
     local is_full_directory_restore=false
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
         echo "--- Browse Recycle Bin ---"
@@ -325,14 +329,11 @@ run_restore_mode() {
         read -p "Enter the full original path of the item to restore (e.g., home/user/file.txt): " specific_path
         specific_path=$(echo "$specific_path" | sed 's#^/##')
         if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
-        
         full_remote_source="${BOX_ADDR}:${remote_date_path}/${specific_path}"
-        
         if ! rsync -r -n -e "$SSH_CMD" "$full_remote_source" . >/dev/null 2>&1; then
             echo "❌ ERROR: The path '${specific_path}' was not found in the recycle bin for ${date_choice}. Aborting." >&2
             return 1
         fi
-
         default_local_dest="/${specific_path}"
         item_for_display="(from Recycle Bin) '${specific_path}'"
     elif [[ "$dir_choice" == "Cancel" ]]; then 
