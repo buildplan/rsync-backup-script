@@ -145,6 +145,14 @@ if [[ -n "${BANDWIDTH_LIMIT_KBPS:-}" && "${BANDWIDTH_LIMIT_KBPS}" -gt 0 ]]; then
     RSYNC_BASE_OPTS+=(--bwlimit="$BANDWIDTH_LIMIT_KBPS")
 fi
 
+# Shared options for direct, non-interactive SSH commands
+SSH_DIRECT_OPTS=(
+    -o StrictHostKeyChecking=no
+    -o BatchMode=yes
+    -o ConnectTimeout=30
+    -n
+)
+
 # =================================================================
 #                       HELPER FUNCTIONS
 # =================================================================
@@ -307,9 +315,8 @@ run_restore_mode() {
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
         echo "--- Browse Recycle Bin ---"
         local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
-        local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -n)
         local date_folders
-        date_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null) || true
+        date_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null) || true
         if [[ -z "$date_folders" ]]; then
             echo "❌ No dated folders found in the recycle bin. Nothing to restore." >&2
             return 1
@@ -445,10 +452,9 @@ run_recycle_bin_cleanup() {
     if [[ "${RECYCLE_BIN_ENABLED:-false}" != "true" ]]; then return 0; fi
     log_message "Checking remote recycle bin..."
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
-    local ssh_direct_opts=(-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -n)
     local list_command="ls -1 \"$remote_cleanup_path\""
     local all_folders
-    all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$BOX_ADDR" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
+    all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
         log_message "Recycle bin not found or unable to list contents. Nothing to clean."
         return 0
     }
@@ -476,8 +482,8 @@ run_recycle_bin_cleanup() {
             if [[ -n "$folder" ]]; then
                 log_message "  Deleting: $folder"
                 local remote_dir_to_delete="${remote_cleanup_path}/${folder}/"
-                rsync -a --delete -e "$SSH_CMD" "$empty_dir/" "${BOX_ADDR}:${remote_dir_to_delete}" >/dev/null 2>> "${LOG_FILE:-/dev/null}"               
-                ssh "${SSH_OPTS_ARRAY[@]}" "${ssh_direct_opts[@]}" "$BOX_ADDR" "rmdir \"$remote_dir_to_delete\"" 2>> "${LOG_FILE:-/dev/null}"
+                rsync -a --delete -e "$SSH_CMD" "$empty_dir/" "${BOX_ADDR}:${remote_dir_to_delete}" >/dev/null 2>> "${LOG_FILE:-/dev/null}"
+                ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "rmdir \"$remote_dir_to_delete\"" 2>> "${LOG_FILE:-/dev/null}"
             fi
         done <<< "$folders_to_delete"
 
@@ -574,6 +580,9 @@ if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$max_log_size_bytes" 
     touch "$LOG_FILE"
     find "$(dirname "$LOG_FILE")" -name "$(basename "$LOG_FILE").*" -type f -mtime +"$LOG_RETENTION_DAYS" -delete
 fi
+
+log_message "Flushing filesystem buffers to disk..."
+sync
 
 echo "============================================================" >> "$LOG_FILE"
 log_message "Starting rsync backup..."
