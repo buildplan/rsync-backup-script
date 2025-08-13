@@ -9,7 +9,8 @@
 # LOG_RETENTION_DAYS=7
 # MAX_LOG_SIZE_MB=10
 # BANDWIDTH_LIMIT_KBPS=1000
-# RSYNC_NOATIME_ENABLED=false # Set to true for a performance boost if rsync >= 3.3.0. Set to false for older versions (e.g., 3.2.7).
+# RSYNC_NOATIME_ENABLED=false
+# Set RSYNC_NOATIME_ENABLED to true for rsync >= 3.3.0. Set to false for older versions (e.g., 3.2.7).
 # RSYNC_TIMEOUT=300
 # RECYCLE_BIN_ENABLED=true
 # RECYCLE_BIN_DIR="recycle_bin"
