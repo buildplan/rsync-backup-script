@@ -184,7 +184,7 @@ To run the backup automatically, edit the root crontab.
 
 ```ini
 # =================================================================
-#         Configuration for rsync Backup Script v0.30
+#         Configuration for rsync Backup Script v0.31
 # =================================================================
 # !! IMPORTANT !! Set file permissions to 600 (chmod 600 backup.conf)
 
@@ -215,6 +215,9 @@ BEGIN_SSH_OPTS
 -i
 /root/.ssh/id_ed25519
 END_SSH_OPTS
+
+# Set RSYNC_NOATIME_ENABLED to true for a performance boost if rsync >= 3.3.0. Set to false for older versions (e.g., 3.2.7).
+RSYNC_NOATIME_ENABLED=false
 
 # The timeout in seconds for rsync operations.
 RSYNC_TIMEOUT=300
@@ -304,7 +307,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-# ===================== v0.30 - 2025.08.13 ========================
+# ===================== v0.31 - 2025.08.13 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -374,9 +377,8 @@ if [ -f "$CONFIG_FILE" ]; then
             value="${value%\"}"; value="${value#\"}"
 
             case "$key" in
-                BACKUP_DIRS|BOX_DIR|BOX_ADDR|LOG_FILE|LOG_RETENTION_DAYS|\
-                MAX_LOG_SIZE_MB|BANDWIDTH_LIMIT_KBPS|RSYNC_TIMEOUT|\
-                CHECKSUM_ENABLED|\
+                BACKUP_DIRS|BOX_DIR|BOX_ADDR|LOG_FILE|LOG_RETENTION_DAYS|CHECKSUM_ENABLED|\
+                MAX_LOG_SIZE_MB|BANDWIDTH_LIMIT_KBPS|RSYNC_TIMEOUT|RSYNC_NOATIME_ENABLED|\
                 NTFY_ENABLED|DISCORD_ENABLED|NTFY_TOKEN|NTFY_URL|DISCORD_WEBHOOK_URL|\
                 NTFY_PRIORITY_SUCCESS|NTFY_PRIORITY_WARNING|NTFY_PRIORITY_FAILURE|\
                 RECYCLE_BIN_ENABLED|RECYCLE_BIN_DIR|RECYCLE_BIN_RETENTION_DAYS)
@@ -435,10 +437,14 @@ if (( ${#SSH_OPTS_ARRAY[@]} > 0 )); then
 fi
 
 RSYNC_BASE_OPTS=(
-    -aR -z --delete --partial --timeout="${RSYNC_TIMEOUT:-300}" --mkpath --noatime
+    -aR -z --delete --partial --timeout="${RSYNC_TIMEOUT:-300}" --mkpath
     --exclude-from="$EXCLUDE_FILE_TMP"
     -e "$SSH_CMD"
 )
+
+if [[ "${RSYNC_NOATIME_ENABLED:-false}" == "true" ]]; then
+    RSYNC_BASE_OPTS+=(--noatime)
+fi
 
 # Optional: Add bandwidth limit if configured
 if [[ -n "${BANDWIDTH_LIMIT_KBPS:-}" && "${BANDWIDTH_LIMIT_KBPS}" -gt 0 ]]; then
@@ -542,6 +548,20 @@ run_preflight_checks() {
     done
     if [[ "$check_failed" == "true" ]]; then exit 10; fi
     if [[ "$test_mode" == "true" ]]; then printf "${C_GREEN}✅ All required commands are present.${C_RESET}\n"; fi
+    # Check rsync version for --noatime compatibility if the feature is enabled
+    if [[ "${RSYNC_NOATIME_ENABLED:-false}" == "true" ]]; then
+        if [[ "$test_mode" == "true" ]]; then printf "${C_BOLD}--- Checking rsync version for --noatime...${C_RESET}\n"; fi
+        local rsync_version
+        rsync_version=$(rsync --version | head -n1 | awk '{print $3}')
+        local major minor
+        IFS='.' read -r major minor _ <<< "$rsync_version"
+        if ! (( major > 3 || (major == 3 && minor >= 3) )); then
+            printf "${C_RED}❌ FATAL: RSYNC_NOATIME_ENABLED is true but rsync version %s is too old.${C_RESET}\n" "$rsync_version" >&2
+            printf "${C_DIM}   The --noatime option requires rsync version 3.3.0 or newer.${C_RESET}\n" >&2
+            exit 10
+        fi
+        if [[ "$test_mode" == "true" ]]; then printf "${C_GREEN}✅ rsync version %s supports --noatime.${C_RESET}\n" "$rsync_version"; fi
+    fi
     if [[ "$test_mode" == "true" ]]; then printf "${C_BOLD}--- Checking SSH connectivity...${C_RESET}\n"; fi
     # Quick preflight connectivity "ping": short 10s timeout for fail-fast behaviour
     if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" 'exit' 2>/dev/null; then
@@ -568,7 +588,7 @@ run_preflight_checks() {
             fi
             if [[ "$dir" != *"/./"* ]]; then
                 local err_msg="Directory '$dir' in BACKUP_DIRS is missing the required '/./' syntax."
-                if [[ "$test_mode" == "true" ]]; then 
+                if [[ "$test_mode" == "true" ]]; then
                     echo "❌ FATAL: $err_msg"
                 else
                     send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"
