@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.28 - 2025.08.12 ========================
+# ===================== v0.29 - 2025.08.13 ========================
 #
 # Example backup.conf:
 # BACKUP_DIRS="/home/user/test/./ /var/www/./"
@@ -36,6 +36,25 @@ set -Euo pipefail
 umask 077
 
 HOSTNAME=$(hostname -s)
+
+# --- Color Palette ---
+if [ -t 1 ]; then
+    C_RESET='\e[0m'
+    C_BOLD='\e[1m'
+    C_DIM='\e[2m'
+    C_RED='\e[0;31m'
+    C_GREEN='\e[0;32m'
+    C_YELLOW='\e[0;33m'
+    C_CYAN='\e[0;36m'
+else
+    C_RESET=''
+    C_BOLD=''
+    C_DIM=''
+    C_RED=''
+    C_GREEN=''
+    C_YELLOW=''
+    C_CYAN=''
+fi
 
 # Check if the script is being run as root
 if (( EUID != 0 )); then
@@ -240,20 +259,19 @@ run_preflight_checks() {
     local mode=${1:-backup}; local test_mode=false
     if [[ "$mode" == "test" ]]; then test_mode=true; fi
     local check_failed=false
-    if [[ "$test_mode" == "true" ]]; then echo "--- Checking required commands..."; fi
+    if [[ "$test_mode" == "true" ]]; then printf "${C_BOLD}--- Checking required commands...${C_RESET}\n"; fi
     for cmd in "${REQUIRED_CMDS[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then echo "❌ FATAL: Required command '$cmd' not found." >&2; check_failed=true; fi
     done
     if [[ "$check_failed" == "true" ]]; then exit 10; fi
-    if [[ "$test_mode" == "true" ]]; then echo "✅ All required commands are present."; fi
-    if [[ "$test_mode" == "true" ]]; then echo "--- Checking SSH connectivity..."; fi
-
+    if [[ "$test_mode" == "true" ]]; then printf "${C_GREEN}✅ All required commands are present.${C_RESET}\n"; fi
+    if [[ "$test_mode" == "true" ]]; then printf "${C_BOLD}--- Checking SSH connectivity...${C_RESET}\n"; fi
     # Quick preflight connectivity "ping": short 10s timeout for fail-fast behaviour
     if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" 'exit' 2>/dev/null; then
         local err_msg="Unable to SSH into $BOX_ADDR. Check keys and connectivity."
         if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
     fi
-    if [[ "$test_mode" == "true" ]]; then echo "✅ SSH connectivity OK."; fi
+    if [[ "$test_mode" == "true" ]]; then printf "${C_GREEN}✅ SSH connectivity OK.${C_RESET}\n"; fi
     if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
         local remote_recycle_path="${BOX_DIR}${RECYCLE_BIN_DIR}"
         if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" "ls -d \"$remote_recycle_path\"" >/dev/null 2>&1; then
@@ -264,7 +282,7 @@ run_preflight_checks() {
         fi
     fi
     if [[ "$mode" != "restore" ]]; then
-        if [[ "$test_mode" == "true" ]]; then echo "--- Checking backup directories..."; fi
+        if [[ "$test_mode" == "true" ]]; then printf "${C_BOLD}--- Checking backup directories...${C_RESET}\n"; fi
         local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
         for dir in "${DIRS_ARRAY[@]}"; do
             if [[ ! -d "$dir" ]] || [[ "$dir" != */ ]]; then
@@ -285,9 +303,9 @@ run_preflight_checks() {
                 if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi; exit 2
             fi
         done
-        if [[ "$test_mode" == "true" ]]; then echo "✅ All backup directories are valid."; fi
-        if [[ "$test_mode" == "true" ]]; then echo "--- Checking local disk space..."; fi
-        local required_space_kb=102400 # 100MB in KB
+        if [[ "$test_mode" == "true" ]]; then printf "${C_GREEN}✅ All backup directories are valid.${C_RESET}\n"; fi
+        if [[ "$test_mode" == "true" ]]; then printf "${C_BOLD}--- Checking local disk space...${C_RESET}\n"; fi
+        local required_space_kb=102400
         local available_space_kb
         available_space_kb=$(df --output=avail "$(dirname "${LOG_FILE}")" | tail -n1)
         if [[ "$available_space_kb" -lt "$required_space_kb" ]]; then
@@ -295,11 +313,11 @@ run_preflight_checks() {
             if [[ "$test_mode" == "true" ]]; then echo "❌ FATAL: $err_msg"; else send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "FATAL: $err_msg"; fi
             exit 7
         fi
-        if [[ "$test_mode" == "true" ]]; then echo "✅ Local disk space OK."; fi
+        if [[ "$test_mode" == "true" ]]; then printf "${C_GREEN}✅ Local disk space OK.${C_RESET}\n"; fi
     fi
 }
 run_restore_mode() {
-    echo "--- RESTORE MODE ACTIVATED ---"
+    printf "${C_BOLD}${C_CYAN}--- RESTORE MODE ACTIVATED ---${C_RESET}\n"
     run_preflight_checks "restore"
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
     local RECYCLE_OPTION="[ Restore from Recycle Bin ]"
@@ -308,7 +326,7 @@ run_restore_mode() {
         all_options+=("$RECYCLE_OPTION")
     fi
     all_options+=("Cancel")
-    echo "Available backup sets to restore from:"
+    printf "${C_YELLOW}Available backup sets to restore from:${C_RESET}\n"
     select dir_choice in "${all_options[@]}"; do
         if [[ -n "$dir_choice" ]]; then break;
         else echo "Invalid selection. Please try again."; fi
@@ -319,7 +337,7 @@ run_restore_mode() {
     local restore_path=""
     local is_full_directory_restore=false
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
-        echo "--- Browse Recycle Bin ---"
+        printf "${C_BOLD}${C_CYAN}--- Browse Recycle Bin ---${C_RESET}\n"
         local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
         local date_folders
         date_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null) || true
@@ -327,19 +345,20 @@ run_restore_mode() {
             echo "❌ No dated folders found in the recycle bin. Nothing to restore." >&2
             return 1
         fi
-	echo "Select a backup run (date_time) to browse:"
+        printf "${C_YELLOW}Select a backup run (date_time) to browse:${C_RESET}\n"
         select date_choice in $date_folders "Cancel"; do
             if [[ "$date_choice" == "Cancel" ]]; then echo "Restore cancelled."; return 0;
             elif [[ -n "$date_choice" ]]; then break;
             else echo "Invalid selection. Please try again."; fi
         done
         local remote_date_path="${remote_recycle_path}/${date_choice}"
-        echo "--- Files available from ${date_choice} (showing first 20) ---"
+        printf "${C_BOLD}--- Files available from ${date_choice} (showing first 20) ---${C_RESET}\n"
         local remote_listing_source="${BOX_ADDR}:${remote_date_path}/"
         rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" . 2>/dev/null | head -n 20 || echo "No files found for this date."
-        echo "--------------------------------------------------------"
-        local specific_path
-        read -p "Enter the full original path of the item to restore (e.g., home/user/file.txt): " specific_path
+        printf "${C_BOLD}--------------------------------------------------------${C_RESET}\n"
+        local specific_path_prompt
+        printf -v specific_path_prompt "Enter the full original path of the item to restore (e.g., home/user/file.txt): "
+        read -p "${C_YELLOW}${specific_path_prompt}${C_RESET}" specific_path
         specific_path=$(echo "$specific_path" | sed 's#^/##')
         if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
         full_remote_source="${BOX_ADDR}:${remote_date_path}/${specific_path}"
@@ -349,14 +368,15 @@ run_restore_mode() {
         fi
         default_local_dest="/${specific_path}"
         item_for_display="(from Recycle Bin) '${specific_path}'"
-    elif [[ "$dir_choice" == "Cancel" ]]; then 
+    elif [[ "$dir_choice" == "Cancel" ]]; then
         echo "Restore cancelled."
         return 0
     else
         item_for_display="the entire directory '${dir_choice}'"
         while true; do
-            local choice_prompt=$'\nRestore the entire directory or a specific file/subfolder? [entire/specific]: '
-            read -p "$choice_prompt" choice
+            local choice_prompt
+            printf -v choice_prompt "\nRestore the entire directory or a specific file/subfolder? [entire/specific]: "
+            read -p "${C_YELLOW}${choice_prompt}${C_RESET}" choice
             case "$choice" in
                 entire)
                     is_full_directory_restore=true
@@ -365,7 +385,7 @@ run_restore_mode() {
                 specific)
                     local specific_path_prompt
                     printf -v specific_path_prompt "Enter the path relative to '%s' to restore: " "$dir_choice"
-                    read -ep "$specific_path_prompt" specific_path
+                    read -ep "${C_YELLOW}${specific_path_prompt}${C_RESET}" specific_path
                     specific_path=$(echo "$specific_path" | sed 's#^/##')
                     if [[ -n "$specific_path" ]]; then
                         restore_path="$specific_path"
@@ -388,15 +408,15 @@ run_restore_mode() {
     fi
     local final_dest
     local dest_prompt
-    printf -v dest_prompt "\nEnter the destination path.\nPress [Enter] to use the original location (%s): " "$default_local_dest"
-    read -p "$dest_prompt" final_dest
+    printf -v dest_prompt "\nEnter the destination path.\n${C_DIM}Press [Enter] to use the original location (%s):${C_RESET} " "$default_local_dest"
+    read -p "${C_YELLOW}${dest_prompt}${C_RESET}" final_dest
     : "${final_dest:=$default_local_dest}"
     local extra_rsync_opts=()
     local dest_user=""
     if [[ "$final_dest" == /home/* ]]; then
         dest_user=$(echo "$final_dest" | cut -d/ -f3)
         if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
-            echo "ℹ️  Home directory detected. Restored files will be owned by '${dest_user}'."
+            printf "${C_CYAN}ℹ️  Home directory detected. Restored files will be owned by '${dest_user}'.${C_RESET}\n"
             extra_rsync_opts+=("--chown=${dest_user}:${dest_user}")
         else
             dest_user=""
@@ -422,34 +442,34 @@ run_restore_mode() {
     if [[ "$dest_created" == "true" && "${is_full_directory_restore:-false}" == "true" ]]; then
         chmod 700 "$final_dest"; log_message "Set permissions to 700 on newly created restore directory: $final_dest"
     fi
-    echo "Restore destination is set to: $final_dest"
-    echo ""; echo "--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---"
+    printf "Restore destination is set to: ${C_BOLD}%s${C_RESET}\n" "$final_dest"
+    printf "\n${C_BOLD}${C_YELLOW}--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---${C_RESET}\n"
     log_message "Starting restore dry-run of ${item_for_display} from ${full_remote_source} to ${final_dest}"
     local rsync_restore_opts=(-avhi --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "$SSH_CMD")
     if ! rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
         echo "❌ DRY RUN FAILED. Rsync reported an error. Aborting." >&2; return 1
     fi
-    echo "--- DRY RUN COMPLETE ---"
+    printf "${C_BOLD}${C_GREEN}--- DRY RUN COMPLETE ---${C_RESET}\n"
     local confirmation
     while true; do
         local confirmation_prompt
         printf -v confirmation_prompt "\nAre you sure you want to proceed with restoring %s to '%s'? [yes/no]: " "$item_for_display" "$final_dest"
-        read -p "$confirmation_prompt" confirmation
+        read -p "${C_YELLOW}${confirmation_prompt}${C_RESET}" confirmation
         case "$confirmation" in
             yes) break ;;
             no) echo "Restore aborted by user." ; return 0 ;;
             *) echo "Please answer yes or no." ;;
         esac
     done
-    echo -e "\n--- PROCEEDING WITH RESTORE... ---"
+    printf "\n${C_BOLD}--- PROCEEDING WITH RESTORE... ---${C_RESET}\n"
     log_message "Starting REAL restore of ${item_for_display} from ${full_remote_source} to ${final_dest}"
     if rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" "$full_remote_source" "$final_dest"; then
         log_message "Restore completed successfully."
-        echo "✅ Restore of $item_for_display to '$final_dest' completed successfully."
+        printf "${C_GREEN}✅ Restore of %s to '%s' completed successfully.${C_RESET}\n" "$item_for_display" "$final_dest"
         send_notification "✅ Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${item_for_display} to ${final_dest}"
     else
         log_message "Restore FAILED with rsync exit code $?."
-        echo "❌ Restore FAILED. Check the rsync output and log for details."
+        printf "${C_RED}❌ Restore FAILED. Check the rsync output and log for details.${C_RESET}\n"
         send_notification "❌ Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${item_for_display} to ${final_dest} failed."
         return 1
     fi
