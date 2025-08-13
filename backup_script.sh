@@ -327,7 +327,7 @@ run_restore_mode() {
             echo "❌ No dated folders found in the recycle bin. Nothing to restore." >&2
             return 1
         fi
-        echo "Select a date to browse:"
+	echo "Select a backup run (date_time) to browse:"
         select date_choice in $date_folders "Cancel"; do
             if [[ "$date_choice" == "Cancel" ]]; then echo "Restore cancelled."; return 0;
             elif [[ -n "$date_choice" ]]; then break;
