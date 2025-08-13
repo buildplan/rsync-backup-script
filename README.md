@@ -225,7 +225,6 @@ RSYNC_NOATIME_ENABLED=false
 # The timeout in seconds for rsync operations.
 RSYNC_TIMEOUT=300
 
-# --- Performance ---
 # Optional: Limit rsync's bandwidth usage in KiB/s. Leave empty or set to 0 to disable.
 # Example: BANDWIDTH_LIMIT_KBPS=5000  (for 5 MB/s)
 BANDWIDTH_LIMIT_KBPS=""
