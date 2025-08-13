@@ -216,7 +216,10 @@ BEGIN_SSH_OPTS
 /root/.ssh/id_ed25519
 END_SSH_OPTS
 
-# Set RSYNC_NOATIME_ENABLED to true for a performance boost if rsync >= 3.3.0. Set to false for older versions (e.g., 3.2.7).
+# --- Performance ---
+# Use --noatime for a potential performance boost.
+# This requires rsync v3.3.0+ on BOTH the local and remote server.
+# If your remote server (e.g., a storage box) has an older rsync, keep this to false.
 RSYNC_NOATIME_ENABLED=false
 
 # The timeout in seconds for rsync operations.
@@ -270,12 +273,13 @@ DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/your/webhook_url_here"
 # List all file/directory patterns to exclude below.
 # The script will read everything between the BEGIN and END markers.
 BEGIN_EXCLUDES
-# Common cache and temporary files
+# Common cache,logs and temporary files
 .cache/
 /tmp/
 *.tmp
 *.bak
 *.swp
+*.log
 
 # Specific application caches/dependencies
 /node_modules/
