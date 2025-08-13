@@ -184,7 +184,7 @@ To run the backup automatically, edit the root crontab.
 
 ```ini
 # =================================================================
-#         Configuration for rsync Backup Script v0.31
+#         Configuration for rsync Backup Script v0.32
 # =================================================================
 # !! IMPORTANT !! Set file permissions to 600 (chmod 600 backup.conf)
 
@@ -311,7 +311,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-# ===================== v0.31 - 2025.08.13 ========================
+# ===================== v0.32 - 2025.08.13 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -570,7 +570,7 @@ run_preflight_checks() {
     # Quick preflight connectivity "ping": short 10s timeout for fail-fast behaviour
     if ! ssh "${SSH_OPTS_ARRAY[@]}" -o BatchMode=yes -o ConnectTimeout=10 "$BOX_ADDR" 'exit' 2>/dev/null; then
         local err_msg="Unable to SSH into $BOX_ADDR. Check keys and connectivity."
-        if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "❌ SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
+        if [[ "$test_mode" == "true" ]]; then echo "❌ $err_msg"; else send_notification "SSH FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$err_msg"; fi; exit 6
     fi
     if [[ "$test_mode" == "true" ]]; then printf "${C_GREEN}✅ SSH connectivity OK.${C_RESET}\n"; fi
     if [[ "${RECYCLE_BIN_ENABLED:-false}" == "true" ]]; then
@@ -765,11 +765,11 @@ run_restore_mode() {
     if rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" "$full_remote_source" "$final_dest"; then
         log_message "Restore completed successfully."
         printf "${C_GREEN}✅ Restore of %s to '%s' completed successfully.${C_RESET}\n" "$item_for_display" "$final_dest"
-        send_notification "✅ Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${item_for_display} to ${final_dest}"
+        send_notification "Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${item_for_display} to ${final_dest}"
     else
         log_message "Restore FAILED with rsync exit code $?."
         printf "${C_RED}❌ Restore FAILED. Check the rsync output and log for details.${C_RESET}\n"
-        send_notification "❌ Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${item_for_display} to ${final_dest} failed."
+        send_notification "Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${item_for_display} to ${final_dest} failed."
         return 1
     fi
 }
@@ -819,7 +819,7 @@ run_recycle_bin_cleanup() {
     fi
 }
 trap cleanup EXIT
-trap 'send_notification "❌ Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
+trap 'send_notification "Backup Crashed: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly. Check log: ${LOG_FILE:-/dev/null}"' ERR
 
 REQUIRED_CMDS=(rsync ssh curl flock hostname date stat mv touch awk numfmt grep printf nice ionice sed mktemp basename read)
 
@@ -874,13 +874,13 @@ if [[ "${1:-}" ]]; then
                 if [ -z "$CLEAN_DISCREPANCIES" ]; then
                     echo "✅ Checksum validation passed. No discrepancies found."
                     log_message "Checksum validation passed. No discrepancies found."
-                    send_notification "✅ Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Checksum validation passed."
+                    send_notification "Backup Integrity OK: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Checksum validation passed."
                 else
                     log_message "Backup integrity check FAILED. Found discrepancies."
                     ISSUE_LIST=$(echo "$CLEAN_DISCREPANCIES" | head -n 10)
                     printf -v FAILURE_MSG "Backup integrity check FAILED.\n\nFirst 10 differing files:\n%s\n\nCheck duration: %dm %ds" "${ISSUE_LIST}" $((DURATION_INTEGRITY / 60)) $((DURATION_INTEGRITY % 60))
                     printf "❌ %s\n" "$FAILURE_MSG"
-                    send_notification "❌ Backup Integrity FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "${FAILURE_MSG}"
+                    send_notification "Backup Integrity FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "${FAILURE_MSG}"
                 fi
             fi
             exit 0 ;;
@@ -963,12 +963,12 @@ fi
 if [[ ${#failed_dirs[@]} -eq 0 ]]; then
     log_message "SUCCESS: All backups completed."
     if [[ $overall_exit_code -eq 24 ]]; then
-        send_notification "⚠️ Backup Warning: ${HOSTNAME}" "warning" "${NTFY_PRIORITY_WARNING}" "warning" "One or more directories completed with warnings.\n\n$FINAL_MESSAGE"
+        send_notification "Backup Warning: ${HOSTNAME}" "warning" "${NTFY_PRIORITY_WARNING}" "warning" "One or more directories completed with warnings.\n\n$FINAL_MESSAGE"
     else
-        send_notification "✅ Backup SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "$FINAL_MESSAGE"
+        send_notification "Backup SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "$FINAL_MESSAGE"
     fi
 else
-    log_message "FAILURE: One or more backups failed."; send_notification "❌ Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$FINAL_MESSAGE"
+    log_message "FAILURE: One or more backups failed."; send_notification "Backup FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "$FINAL_MESSAGE"
 fi
 
 echo "======================= Run Finished =======================" >> "$LOG_FILE"
