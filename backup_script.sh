@@ -374,7 +374,7 @@ run_restore_mode() {
         item_for_display="the entire directory '${dir_choice}'"
         while true; do
             printf "\n${C_YELLOW}Restore the entire directory or a specific file/subfolder? [entire/specific]: ${C_RESET}"
-            read -r choice            
+            read -r choice
             case "$choice" in
                 entire)
                     is_full_directory_restore=true
