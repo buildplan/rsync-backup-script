@@ -334,7 +334,7 @@ run_restore_mode() {
     local full_remote_source=""
     local default_local_dest=""
     local item_for_display=""
-    local restore_path=""
+    local restore_path="" 
     local is_full_directory_restore=false
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
         printf "${C_BOLD}${C_CYAN}--- Browse Recycle Bin ---${C_RESET}\n"
@@ -356,9 +356,8 @@ run_restore_mode() {
         local remote_listing_source="${BOX_ADDR}:${remote_date_path}/"
         rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" . 2>/dev/null | head -n 20 || echo "No files found for this date."
         printf "${C_BOLD}--------------------------------------------------------${C_RESET}\n"
-        local specific_path_prompt
-        printf -v specific_path_prompt "Enter the full original path of the item to restore (e.g., home/user/file.txt): "
-        read -p "${C_YELLOW}${specific_path_prompt}${C_RESET}" specific_path
+        printf "${C_YELLOW}Enter the full original path of the item to restore (e.g., home/user/file.txt): ${C_RESET}"
+        read -r specific_path
         specific_path=$(echo "$specific_path" | sed 's#^/##')
         if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
         full_remote_source="${BOX_ADDR}:${remote_date_path}/${specific_path}"
@@ -368,15 +367,14 @@ run_restore_mode() {
         fi
         default_local_dest="/${specific_path}"
         item_for_display="(from Recycle Bin) '${specific_path}'"
-    elif [[ "$dir_choice" == "Cancel" ]]; then
+    elif [[ "$dir_choice" == "Cancel" ]]; then 
         echo "Restore cancelled."
         return 0
     else
         item_for_display="the entire directory '${dir_choice}'"
         while true; do
-            local choice_prompt
-            printf -v choice_prompt "\nRestore the entire directory or a specific file/subfolder? [entire/specific]: "
-            read -p "${C_YELLOW}${choice_prompt}${C_RESET}" choice
+            printf "\n${C_YELLOW}Restore the entire directory or a specific file/subfolder? [entire/specific]: ${C_RESET}"
+            read -r choice            
             case "$choice" in
                 entire)
                     is_full_directory_restore=true
@@ -384,8 +382,9 @@ run_restore_mode() {
                     ;;
                 specific)
                     local specific_path_prompt
-                    printf -v specific_path_prompt "Enter the path relative to '%s' to restore: " "$dir_choice"
-                    read -ep "${C_YELLOW}${specific_path_prompt}${C_RESET}" specific_path
+                    printf -v specific_path_prompt "Enter the path relative to '%s' to restore: " "$dir_choice"                    
+                    printf "${C_YELLOW}%s${C_RESET}" "$specific_path_prompt"
+                    read -er specific_path
                     specific_path=$(echo "$specific_path" | sed 's#^/##')
                     if [[ -n "$specific_path" ]]; then
                         restore_path="$specific_path"
@@ -406,10 +405,9 @@ run_restore_mode() {
             default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#')
         fi
     fi
-    local final_dest
-    local dest_prompt
-    printf -v dest_prompt "\nEnter the destination path.\n${C_DIM}Press [Enter] to use the original location (%s):${C_RESET} " "$default_local_dest"
-    read -p "${C_YELLOW}${dest_prompt}${C_RESET}" final_dest
+    local final_dest    
+    printf "\n${C_YELLOW}Enter the destination path.\n${C_DIM}Press [Enter] to use the original location (%s):${C_RESET} " "$default_local_dest"
+    read -r final_dest
     : "${final_dest:=$default_local_dest}"
     local extra_rsync_opts=()
     local dest_user=""
@@ -452,9 +450,9 @@ run_restore_mode() {
     printf "${C_BOLD}${C_GREEN}--- DRY RUN COMPLETE ---${C_RESET}\n"
     local confirmation
     while true; do
-        local confirmation_prompt
-        printf -v confirmation_prompt "\nAre you sure you want to proceed with restoring %s to '%s'? [yes/no]: " "$item_for_display" "$final_dest"
-        read -p "${C_YELLOW}${confirmation_prompt}${C_RESET}" confirmation
+        printf "\n${C_YELLOW}Are you sure you want to proceed with restoring %s to '%s'? [yes/no]: ${C_RESET}" "$item_for_display" "$final_dest"
+        read -r confirmation
+        
         case "$confirmation" in
             yes) break ;;
             no) echo "Restore aborted by user." ; return 0 ;;
