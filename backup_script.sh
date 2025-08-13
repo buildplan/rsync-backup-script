@@ -334,7 +334,7 @@ run_restore_mode() {
     local full_remote_source=""
     local default_local_dest=""
     local item_for_display=""
-    local restore_path="" 
+    local restore_path=""
     local is_full_directory_restore=false
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
         printf "${C_BOLD}${C_CYAN}--- Browse Recycle Bin ---${C_RESET}\n"
@@ -367,7 +367,7 @@ run_restore_mode() {
         fi
         default_local_dest="/${specific_path}"
         item_for_display="(from Recycle Bin) '${specific_path}'"
-    elif [[ "$dir_choice" == "Cancel" ]]; then 
+    elif [[ "$dir_choice" == "Cancel" ]]; then
         echo "Restore cancelled."
         return 0
     else
