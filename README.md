@@ -184,7 +184,7 @@ To run the backup automatically, edit the root crontab.
 
 ```ini
 # =================================================================
-#         Configuration for rsync Backup Script v0.29
+#         Configuration for rsync Backup Script v0.30
 # =================================================================
 # !! IMPORTANT !! Set file permissions to 600 (chmod 600 backup.conf)
 
@@ -215,6 +215,9 @@ BEGIN_SSH_OPTS
 -i
 /root/.ssh/id_ed25519
 END_SSH_OPTS
+
+# The timeout in seconds for rsync operations.
+RSYNC_TIMEOUT=300
 
 # --- Performance ---
 # Optional: Limit rsync's bandwidth usage in KiB/s. Leave empty or set to 0 to disable.
@@ -301,7 +304,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-# ===================== v0.29 - 2025.08.13 ========================
+# ===================== v0.30 - 2025.08.13 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -372,7 +375,7 @@ if [ -f "$CONFIG_FILE" ]; then
 
             case "$key" in
                 BACKUP_DIRS|BOX_DIR|BOX_ADDR|LOG_FILE|LOG_RETENTION_DAYS|\
-                MAX_LOG_SIZE_MB|BANDWIDTH_LIMIT_KBPS|\
+                MAX_LOG_SIZE_MB|BANDWIDTH_LIMIT_KBPS|RSYNC_TIMEOUT|\
                 CHECKSUM_ENABLED|\
                 NTFY_ENABLED|DISCORD_ENABLED|NTFY_TOKEN|NTFY_URL|DISCORD_WEBHOOK_URL|\
                 NTFY_PRIORITY_SUCCESS|NTFY_PRIORITY_WARNING|NTFY_PRIORITY_FAILURE|\
@@ -432,7 +435,7 @@ if (( ${#SSH_OPTS_ARRAY[@]} > 0 )); then
 fi
 
 RSYNC_BASE_OPTS=(
-    -aR -z --delete --partial --timeout=60 --mkpath
+    -aR -z --delete --partial --timeout="${RSYNC_TIMEOUT:-300}" --mkpath --noatime
     --exclude-from="$EXCLUDE_FILE_TMP"
     -e "$SSH_CMD"
 )
@@ -928,6 +931,10 @@ FINAL_MESSAGE=$(printf "%s\n\nSuccessful: %s\nFailed: %s\n\nDuration: %dm %ds" \
     "${success_dirs[*]:-None}" \
     "${failed_dirs[*]:-None}" \
     $((DURATION / 60)) $((DURATION % 60)))
+
+if [[ ${#FINAL_MESSAGE} -gt 1800 ]]; then
+    FINAL_MESSAGE=$(printf "%.1800s\n\n[Message truncated, see %s for full details]" "$FINAL_MESSAGE" "$LOG_FILE")
+fi
 
 if [[ ${#failed_dirs[@]} -eq 0 ]]; then
     log_message "SUCCESS: All backups completed."
