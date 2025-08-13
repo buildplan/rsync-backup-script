@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.29 - 2025.08.13 ========================
+# ===================== v0.30 - 2025.08.13 ========================
 #
 # Example backup.conf:
 # BACKUP_DIRS="/home/user/test/./ /var/www/./"
@@ -9,6 +9,7 @@
 # LOG_RETENTION_DAYS=7
 # MAX_LOG_SIZE_MB=10
 # BANDWIDTH_LIMIT_KBPS=1000
+# RSYNC_TIMEOUT=300
 # RECYCLE_BIN_ENABLED=true
 # RECYCLE_BIN_DIR="recycle_bin"
 # RECYCLE_BIN_RETENTION_DAYS=30
@@ -98,7 +99,7 @@ if [ -f "$CONFIG_FILE" ]; then
 
             case "$key" in
                 BACKUP_DIRS|BOX_DIR|BOX_ADDR|LOG_FILE|LOG_RETENTION_DAYS|\
-                MAX_LOG_SIZE_MB|BANDWIDTH_LIMIT_KBPS|\
+                MAX_LOG_SIZE_MB|BANDWIDTH_LIMIT_KBPS|RSYNC_TIMEOUT|\
                 CHECKSUM_ENABLED|\
                 NTFY_ENABLED|DISCORD_ENABLED|NTFY_TOKEN|NTFY_URL|DISCORD_WEBHOOK_URL|\
                 NTFY_PRIORITY_SUCCESS|NTFY_PRIORITY_WARNING|NTFY_PRIORITY_FAILURE|\
@@ -158,7 +159,7 @@ if (( ${#SSH_OPTS_ARRAY[@]} > 0 )); then
 fi
 
 RSYNC_BASE_OPTS=(
-    -aR -z --delete --partial --timeout=60 --mkpath
+    -aR -z --delete --partial --timeout="${RSYNC_TIMEOUT:-300}" --mkpath --noatime
     --exclude-from="$EXCLUDE_FILE_TMP"
     -e "$SSH_CMD"
 )
@@ -654,6 +655,10 @@ FINAL_MESSAGE=$(printf "%s\n\nSuccessful: %s\nFailed: %s\n\nDuration: %dm %ds" \
     "${success_dirs[*]:-None}" \
     "${failed_dirs[*]:-None}" \
     $((DURATION / 60)) $((DURATION % 60)))
+
+if [[ ${#FINAL_MESSAGE} -gt 1800 ]]; then
+    FINAL_MESSAGE=$(printf "%.1800s\n\n[Message truncated, see %s for full details]" "$FINAL_MESSAGE" "$LOG_FILE")
+fi
 
 if [[ ${#failed_dirs[@]} -eq 0 ]]; then
     log_message "SUCCESS: All backups completed."
