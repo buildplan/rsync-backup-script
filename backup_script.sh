@@ -337,7 +337,6 @@ run_preflight_checks() {
     fi
 }
 run_restore_mode() {
-    # Define local commands for consistency
     local RSYNC_CMD="rsync"
     printf "${C_BOLD}${C_CYAN}--- RESTORE MODE ACTIVATED ---${C_RESET}\n"
     run_preflight_checks "restore"
