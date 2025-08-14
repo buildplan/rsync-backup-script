@@ -336,8 +336,11 @@ run_preflight_checks() {
         if [[ "$test_mode" == "true" ]]; then printf "${C_GREEN}✅ Local disk space OK.${C_RESET}\n"; fi
     fi
 }
+print_header() {
+    printf "\n%b--- %s ---%b\n" "${C_BOLD}" "$1" "${C_RESET}"
+}
 run_restore_mode() {
-    printf "${C_BOLD}${C_CYAN}--- RESTORE MODE ACTIVATED ---${C_RESET}\n"
+    print_header "RESTORE MODE ACTIVATED"
     run_preflight_checks "restore"
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
     local RECYCLE_OPTION="[ Restore from Recycle Bin ]"
@@ -347,40 +350,46 @@ run_restore_mode() {
     fi
     all_options+=("Cancel")
     printf "${C_YELLOW}Available backup sets to restore from:${C_RESET}\n"
+    PS3="Your choice: "
     select dir_choice in "${all_options[@]}"; do
         if [[ -n "$dir_choice" ]]; then break;
         else echo "Invalid selection. Please try again."; fi
     done
+    PS3="#? "
     local full_remote_source=""
     local default_local_dest=""
     local item_for_display=""
     local restore_path=""
     local is_full_directory_restore=false
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
-        printf "${C_BOLD}${C_CYAN}--- Browse Recycle Bin ---${C_RESET}\n"
+        print_header "Browse Recycle Bin"
         local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
         local date_folders; date_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null) || true
         local valid_folders=()
         for f in $date_folders; do
-            if [[ "$f" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}$ ]]; then
-                valid_folders+=( "$f" )
-            fi
+            case "$f" in
+                [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9])
+                    valid_folders+=( "$f" )
+                    ;;
+            esac
         done
         date_folders=("${valid_folders[@]}")
         if [[ ${#date_folders[@]} -eq 0 ]]; then
             echo "❌ No validly-named backup folders found in the recycle bin." >&2; return 1
         fi
         printf "${C_YELLOW}Select a backup run (date_time) to browse:${C_RESET}\n"
+        PS3="Your choice: "
         select date_choice in "${date_folders[@]}" "Cancel"; do
             if [[ "$date_choice" == "Cancel" ]]; then echo "Restore cancelled."; return 0;
             elif [[ -n "$date_choice" ]]; then break;
             else echo "Invalid selection. Please try again."; fi
         done
+        PS3="#? "
         local remote_date_path="${remote_recycle_path}/${date_choice}"
-        printf "${C_BOLD}--- Files available from ${date_choice} (showing first 20) ---${C_RESET}\n"
+        print_header "Files available from ${date_choice} (showing first 20)"
         local remote_listing_source="${BOX_ADDR}:${remote_date_path}/"
         rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" . 2>/dev/null | head -n 20 || echo "No files found for this date."
-        printf "${C_BOLD}--------------------------------------------------------${C_RESET}\n"
+        printf "%b--------------------------------------------------------%b\n" "${C_BOLD}" "${C_RESET}"
         printf "${C_YELLOW}Enter the full original path of the item to restore (e.g., home/user/file.txt): ${C_RESET}"; read -r specific_path
         if [[ "$specific_path" == /* || "$specific_path" =~ (^|/)\.\.(/|$) ]]; then
             echo "❌ Invalid restore path: must be relative and contain no '..'" >&2; return 1
@@ -401,7 +410,7 @@ run_restore_mode() {
             case "$choice" in
                 entire) is_full_directory_restore=true; break ;;
                 specific)
-                    printf -v specific_path_prompt "Enter the path relative to '%s' to restore: " "$dir_choice"; printf "${C_YELLOW}%s${C_RESET}" "$specific_path_prompt"; read -er specific_path
+                    printf -v specific_path_prompt "Enter the path relative to '%s' to restore (e.g., subfolder/file.txt): " "$dir_choice"; printf "${C_YELLOW}%s${C_RESET}" "$specific_path_prompt"; read -er specific_path
                     if [[ "$specific_path" == /* || "$specific_path" =~ (^|/)\.\.(/|$) ]]; then
                         echo "❌ Invalid restore path: must be relative and contain no '..'" >&2; return 1
                     fi
@@ -427,13 +436,11 @@ run_restore_mode() {
         fi
     fi
     local final_dest
-    echo -e "\n${C_BOLD}--------------------------------------------------------"
-    echo -e "                Restore Destination"
-    echo -e "--------------------------------------------------------${C_RESET}"
-    echo -e "Enter the absolute destination path for the restore.\n"
-    echo -e "${C_YELLOW}Default (original location):${C_RESET}"
-    echo -e "${C_CYAN}${default_local_dest}${C_RESET}\n"
-    echo -e "Press [Enter] to use the default path, or enter a new one."
+    print_header "Restore Destination"
+    printf "Enter the absolute destination path for the restore.\n\n"
+    printf "%bDefault (original location):%b\n" "${C_YELLOW}" "${C_RESET}"
+    printf "%b%s%b\n\n" "${C_CYAN}" "$default_local_dest" "${C_RESET}"
+    printf "Press [Enter] to use the default path, or enter a new one.\n"
     read -rp "> " final_dest
     : "${final_dest:=$default_local_dest}"
     local path_validation_attempts=0
@@ -502,17 +509,17 @@ run_restore_mode() {
             dest_user=""
         fi
     fi
-    printf "\n${C_BOLD}Restore Summary:${C_RESET}\n"
+    print_header "Restore Summary"
     printf "  Source:      %s\n" "$item_for_display"
-    printf "  Destination: ${C_BOLD}%s${C_RESET}\n" "$final_dest"
-    printf "\n${C_BOLD}${C_YELLOW}--- PERFORMING DRY RUN (NO CHANGES MADE) ---${C_RESET}\n"
+    printf "  Destination: %b%s%b\n" "${C_BOLD}" "$final_dest" "${C_RESET}"
+    print_header "PERFORMING DRY RUN (NO CHANGES MADE)"
     log_message "Starting restore dry-run of ${item_for_display} from ${full_remote_source} to ${final_dest}"
     local rsync_restore_opts=(-avhi --safe-links --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "$SSH_CMD")
     if ! rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
         printf "${C_RED}❌ DRY RUN FAILED. Rsync reported an error. Check connectivity and permissions.${C_RESET}\n" >&2
         log_message "Restore dry-run failed for ${item_for_display}"; return 1
     fi
-    printf "${C_BOLD}${C_GREEN}--- DRY RUN COMPLETE ---${C_RESET}\n"
+    print_header "DRY RUN COMPLETE"
     while true; do
         printf "\n${C_YELLOW}Proceed with restoring %s to '%s'? [yes/no]: ${C_RESET}" "$item_for_display" "$final_dest"; read -r confirmation
         case "${confirmation,,}" in
@@ -521,7 +528,7 @@ run_restore_mode() {
             *) echo "Please answer 'yes' or 'no'." ;;
         esac
     done
-    printf "\n${C_BOLD}--- EXECUTING RESTORE ---${C_RESET}\n"
+    print_header "EXECUTING RESTORE"
     log_message "Starting actual restore of ${item_for_display} from ${full_remote_source} to ${final_dest}"
     if rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" "$full_remote_source" "$final_dest"; then
         log_message "Restore completed successfully."
