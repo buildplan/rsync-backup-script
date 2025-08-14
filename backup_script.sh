@@ -402,7 +402,11 @@ run_restore_mode() {
             esac
         done
         local relative_path="${dir_choice#*./}"
-        full_remote_source="${REMOTE_TARGET}${relative_path}${restore_path}"
+        local remote_base="${REMOTE_TARGET%/}"
+        full_remote_source="${remote_base}/${relative_path#/}"
+        if [[ -n "$restore_path" ]]; then
+            full_remote_source="${full_remote_source%/}/${restore_path#/}"
+        fi
         if [[ -n "$restore_path" ]]; then
             default_local_dest=$(echo "${dir_choice}${restore_path}" | sed 's#/\./#/#')
         else
@@ -426,13 +430,14 @@ run_restore_mode() {
         if (( path_validation_attempts > max_attempts )); then
             printf "\n${C_RED}❌ Too many invalid attempts. Exiting restore mode.${C_RESET}\n"; return 1
         fi
-
         if [[ "$final_dest" != "/" ]]; then final_dest="${final_dest%/}"; fi
-
+        local parent_dir; parent_dir=$(dirname -- "$final_dest")
         if [[ "$final_dest" != /* ]]; then
             printf "\n${C_RED}❌ Error: Please provide an absolute path (starting with '/').${C_RESET}\n"
         elif [[ -e "$final_dest" && ! -d "$final_dest" ]]; then
             printf "\n${C_RED}❌ Error: The destination '%s' exists but is a file. Please choose a different path.${C_RESET}\n" "$final_dest"
+        elif [[ -e "$parent_dir" && ! -w "$parent_dir" ]]; then
+            printf "\n${C_RED}❌ Error: The parent directory '%s' exists but is not writable.${C_RESET}\n" "$parent_dir"
         elif [[ -d "$final_dest" ]]; then
             printf "${C_GREEN}✅ Destination '%s' exists and is accessible.${C_RESET}\n" "$final_dest"
             if [[ "$final_dest" != "$default_local_dest" && -z "$restore_path" ]]; then
@@ -440,8 +445,6 @@ run_restore_mode() {
                  printf "${C_YELLOW}%s${C_RESET}\n" "$warning_msg"; log_message "$warning_msg"
             fi
             break
-        elif ! [ -w "$(dirname "$final_dest")" ]; then
-             printf "${C_RED}❌ Cannot create destination: parent directory '%s' is not writable.${C_RESET}\n" "$(dirname "$final_dest")"
         else
             printf "\n${C_YELLOW}⚠️  The destination '%s' does not exist.${C_RESET}\n" "$final_dest"
             printf "${C_YELLOW}Choose an action:${C_RESET}\n"
@@ -458,8 +461,7 @@ run_restore_mode() {
                              fi
                              break 2
                         else
-                             printf "\n${C_RED}❌ Failed to create directory '%s'. Check permissions.${C_RESET}\n" "$final_dest"
-                             break
+                             printf "\n${C_RED}❌ Failed to create directory '%s'. Check permissions.${C_RESET}\n" "$final_dest"; break
                         fi ;;
                     "Enter a different path")
                         break ;;
