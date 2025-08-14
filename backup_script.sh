@@ -337,6 +337,8 @@ run_preflight_checks() {
     fi
 }
 run_restore_mode() {
+    # Define local commands for consistency
+    local RSYNC_CMD="rsync"
     printf "${C_BOLD}${C_CYAN}--- RESTORE MODE ACTIVATED ---${C_RESET}\n"
     run_preflight_checks "restore"
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
@@ -372,13 +374,13 @@ run_restore_mode() {
         local remote_date_path="${remote_recycle_path}/${date_choice}"
         printf "${C_BOLD}--- Files available from ${date_choice} (showing first 20) ---${C_RESET}\n"
         local remote_listing_source="${BOX_ADDR}:${remote_date_path}/"
-        rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" . 2>/dev/null | head -n 20 || echo "No files found for this date."
+        "$RSYNC_CMD" -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" . 2>/dev/null | head -n 20 || echo "No files found for this date."
         printf "${C_BOLD}--------------------------------------------------------${C_RESET}\n"
         printf "${C_YELLOW}Enter the full original path of the item to restore (e.g., home/user/file.txt): ${C_RESET}"; read -r specific_path
         specific_path=$(echo "$specific_path" | sed 's#^/##')
         if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
         full_remote_source="${BOX_ADDR}:${remote_date_path}/${specific_path}"
-        if ! rsync -r -n -e "$SSH_CMD" "$full_remote_source" . >/dev/null 2>&1; then
+        if ! "$RSYNC_CMD" -r -n -e "$SSH_CMD" "$full_remote_source" . >/dev/null 2>&1; then
             echo "❌ ERROR: The path '${specific_path}' was not found in the recycle bin for ${date_choice}. Aborting." >&2; return 1
         fi
         default_local_dest="/${specific_path}"; item_for_display="(from Recycle Bin) '${specific_path}'"
@@ -497,7 +499,7 @@ run_restore_mode() {
     printf "\n${C_BOLD}${C_YELLOW}--- PERFORMING DRY RUN (NO CHANGES MADE) ---${C_RESET}\n"
     log_message "Starting restore dry-run of ${item_for_display} from ${full_remote_source} to ${final_dest}"
     local rsync_restore_opts=(-avhi --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "$SSH_CMD")
-    if ! rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
+    if ! "$RSYNC_CMD" "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
         printf "${C_RED}❌ DRY RUN FAILED. Rsync reported an error. Check connectivity and permissions.${C_RESET}\n" >&2
         log_message "Restore dry-run failed for ${item_for_display}"; return 1
     fi
@@ -512,7 +514,7 @@ run_restore_mode() {
     done
     printf "\n${C_BOLD}--- EXECUTING RESTORE ---${C_RESET}\n"
     log_message "Starting actual restore of ${item_for_display} from ${full_remote_source} to ${final_dest}"
-    if rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" "$full_remote_source" "$final_dest"; then
+    if "$RSYNC_CMD" "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" "$full_remote_source" "$final_dest"; then
         log_message "Restore completed successfully."
         printf "${C_GREEN}✅ Restore of %s to '%s' completed successfully.${C_RESET}\n" "$item_for_display" "$final_dest"
         send_notification "Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${item_for_display} to ${final_dest}"
