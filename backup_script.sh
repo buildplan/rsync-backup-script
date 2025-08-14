@@ -379,7 +379,7 @@ run_restore_mode() {
         local remote_date_path="${remote_recycle_path}/${date_choice}"
         printf "${C_BOLD}--- Files available from ${date_choice} (showing first 20) ---${C_RESET}\n"
         local remote_listing_source="${BOX_ADDR}:${remote_date_path}/"
-        rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" /dev/null | head -n 20 || echo "No files found for this date."
+        rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" . 2>/dev/null | head -n 20 || echo "No files found for this date."
         printf "${C_BOLD}--------------------------------------------------------${C_RESET}\n"
         printf "${C_YELLOW}Enter the full original path of the item to restore (e.g., home/user/file.txt): ${C_RESET}"; read -r specific_path
         if [[ "$specific_path" == /* || "$specific_path" =~ (^|/)\.\.(/|$) ]]; then
@@ -388,7 +388,8 @@ run_restore_mode() {
         specific_path=$(echo "$specific_path" | sed 's#^/##')
         if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
         full_remote_source="${BOX_ADDR}:${remote_date_path}/${specific_path}"
-        if ! rsync -r -n -e "$SSH_CMD" "$full_remote_source" /dev/null >/dev/null 2>&1; then
+        # FIX: Changed destination from /dev/null to a temporary directory '.' for validation.
+        if ! rsync -r -n -e "$SSH_CMD" "$full_remote_source" . >/dev/null 2>&1; then
             echo "❌ ERROR: The path '${specific_path}' was not found in the recycle bin for ${date_choice}. Aborting." >&2; return 1
         fi
         default_local_dest="/${specific_path}"; item_for_display="(from Recycle Bin) '${specific_path}'"
@@ -427,13 +428,13 @@ run_restore_mode() {
         fi
     fi
     local final_dest
-    printf "\n%s\n" "${C_BOLD}--------------------------------------------------------"
-    printf "%s\n" "                Restore Destination"
-    printf "%s\n" "--------------------------------------------------------${C_RESET}"
-    printf "%s\n\n" "Enter the absolute destination path for the restore."
-    printf "%s\n" "${C_YELLOW}Default (original location):${C_RESET}"
-    printf "${C_CYAN}%s${C_RESET}\n\n" "$default_local_dest"
-    printf "%s\n" "Press [Enter] to use the default path, or enter a new one."
+    echo -e "\n${C_BOLD}--------------------------------------------------------"
+    echo -e "                Restore Destination"
+    echo -e "--------------------------------------------------------${C_RESET}"
+    echo -e "Enter the absolute destination path for the restore.\n"
+    echo -e "${C_YELLOW}Default (original location):${C_RESET}"
+    echo -e "${C_CYAN}${default_local_dest}${C_RESET}\n"
+    echo -e "Press [Enter] to use the default path, or enter a new one."
     read -rp "> " final_dest
     : "${final_dest:=$default_local_dest}"
     local path_validation_attempts=0
