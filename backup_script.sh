@@ -402,7 +402,6 @@ run_restore_mode() {
                 entire) is_full_directory_restore=true; break ;;
                 specific)
                     printf -v specific_path_prompt "Enter the path relative to '%s' to restore: " "$dir_choice"; printf "${C_YELLOW}%s${C_RESET}" "$specific_path_prompt"; read -er specific_path
-                    # Reject absolute paths or parent-dir traversals
                     if [[ "$specific_path" == /* || "$specific_path" =~ (^|/)\.\.(/|$) ]]; then
                         echo "❌ Invalid restore path: must be relative and contain no '..'" >&2; return 1
                     fi
