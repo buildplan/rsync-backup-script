@@ -402,7 +402,7 @@ run_restore_mode() {
                     ;;
                 specific)
                     local specific_path_prompt
-                    printf -v specific_path_prompt "Enter the path relative to '%s' to restore: " "$dir_choice"                    
+                    printf -v specific_path_prompt "Enter the path relative to '%s' to restore: " "$dir_choice"
                     printf "${C_YELLOW}%s${C_RESET}" "$specific_path_prompt"
                     read -er specific_path
                     specific_path=$(echo "$specific_path" | sed 's#^/##')
@@ -425,10 +425,83 @@ run_restore_mode() {
             default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#')
         fi
     fi
-    local final_dest    
-    printf "\n${C_YELLOW}Enter the destination path.\n${C_DIM}Press [Enter] to use the original location (%s):${C_RESET} " "$default_local_dest"
-    read -r final_dest
+    local final_dest
+    printf "\n%s\n" "${C_BOLD}--------------------------------------------------------"
+    printf "%s\n" "                Restore Destination"
+    printf "%s\n" "--------------------------------------------------------${C_RESET}"
+    printf "%s\n\n" "Enter the absolute destination path for the restore."
+    printf "%s\n" "${C_YELLOW}Default (original location):${C_RESET}"
+    printf "${C_CYAN}%s${C_RESET}\n\n" "$default_local_dest"
+    printf "%s\n" "Press [Enter] to use the default path, or enter a new one."
+    read -rp "> " final_dest
     : "${final_dest:=$default_local_dest}"
+    while true; do
+        if [[ "$final_dest" != /* ]]; then
+            printf "\n${C_RED}❌ Error: Please provide an absolute path (starting with '/').${C_RESET}\n"
+            printf "${C_YELLOW}Please enter a new destination path: ${C_RESET}"
+            read -r final_dest
+            if [[ -z "$final_dest" ]]; then
+                final_dest="$default_local_dest"
+                printf "${C_DIM}Empty input, defaulting back to original location: %s${C_RESET}\n" "$final_dest"
+            fi
+            continue
+        fi
+        if [[ -e "$final_dest" ]]; then
+            if [[ -d "$final_dest" ]]; then
+                printf "${C_GREEN}✅ Destination '%s' exists.${C_RESET}\n" "$final_dest"
+                if [[ "$final_dest" != "$default_local_dest" && -z "$restore_path" ]]; then
+                     local warning_msg="⚠️ WARNING: The custom destination directory '$final_dest' already exists. Files may be overwritten."
+                     echo -e "$warning_msg"; log_message "$warning_msg"
+                fi
+                break
+            else
+                printf "\n${C_RED}❌ Error: The destination '%s' exists but is a file. Please choose a different path.${C_RESET}\n" "$final_dest"
+            fi
+        else
+            printf "\n${C_YELLOW}⚠️  The destination '%s' does not exist.${C_RESET}\n\n" "$final_dest"
+            printf "%s\n" "Choose an action:"
+            printf "  %sreate the directory\n" "${C_BOLD}[C]${C_RESET}"
+            printf "  %se-enter a different path\n" "${C_BOLD}[R]${C_RESET}"
+            printf "  %sbort restore\n\n" "${C_BOLD}[A]${C_RESET}"
+            local action_choice
+            read -rp "Your choice [C/R/A]: " action_choice
+            case "${action_choice^^}" in
+                C|CREATE)
+                    if mkdir -p "$final_dest"; then
+                        printf "${C_GREEN}✅ Successfully created directory '%s'.${C_RESET}\n" "$final_dest"
+                        if [[ "${is_full_directory_restore:-false}" == "true" ]]; then
+                            chmod 700 "$final_dest"; log_message "Set permissions to 700 on newly created restore directory: $final_dest"
+                        fi
+                        break
+                    else
+                        printf "\n${C_RED}❌ Failed to create directory '%s'. Please check permissions.${C_RESET}\n" "$final_dest"
+                    fi
+                    ;;
+                R|RE-ENTER)
+                    printf "${C_YELLOW}Please enter the new destination path: ${C_RESET}"
+                    read -r final_dest
+                    if [[ -z "$final_dest" ]]; then
+                        final_dest="$default_local_dest"
+                        printf "${C_DIM}Empty input, defaulting back to original location: %s${C_RESET}\n" "$final_dest"
+                    fi
+                    continue
+                    ;;
+                A|ABORT)
+                    echo "Restore cancelled by user."; return 0
+                    ;;
+                *)
+                    printf "\n${C_RED}Invalid option. Please try again.${C_RESET}\n"
+                    ;;
+            esac
+            continue
+        fi
+        printf "${C_YELLOW}Please enter the new destination path: ${C_RESET}"
+        read -r final_dest
+        if [[ -z "$final_dest" ]]; then
+            final_dest="$default_local_dest"
+            printf "${C_DIM}Empty input, defaulting back to original location: %s${C_RESET}\n" "$final_dest"
+        fi
+    done
     local extra_rsync_opts=()
     local dest_user=""
     if [[ "$final_dest" == /home/* ]]; then
@@ -436,29 +509,10 @@ run_restore_mode() {
         if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
             printf "${C_CYAN}ℹ️  Home directory detected. Restored files will be owned by '${dest_user}'.${C_RESET}\n"
             extra_rsync_opts+=("--chown=${dest_user}:${dest_user}")
+            chown "${dest_user}:${dest_user}" "$final_dest"
         else
             dest_user=""
         fi
-    fi
-    local dest_created=false
-    if [[ ! -e "$final_dest" ]]; then
-        dest_created=true
-    fi
-    local dest_parent
-    dest_parent=$(dirname "$final_dest")
-    if ! mkdir -p "$dest_parent"; then
-        echo "❌ FATAL: Could not create parent destination directory '$dest_parent'. Aborting." >&2
-        return 1
-    fi
-    if [[ -n "$dest_user" ]]; then
-        chown "${dest_user}:${dest_user}" "$dest_parent"
-    fi
-    if [[ "$final_dest" != "$default_local_dest" && -d "$final_dest" && -z "$restore_path" ]]; then
-        local warning_msg="⚠️ WARNING: The custom destination directory '$final_dest' already exists. Files may be overwritten."
-        echo "$warning_msg"; log_message "$warning_msg"
-    fi
-    if [[ "$dest_created" == "true" && "${is_full_directory_restore:-false}" == "true" ]]; then
-        chmod 700 "$final_dest"; log_message "Set permissions to 700 on newly created restore directory: $final_dest"
     fi
     printf "Restore destination is set to: ${C_BOLD}%s${C_RESET}\n" "$final_dest"
     printf "\n${C_BOLD}${C_YELLOW}--- PERFORMING DRY RUN. NO FILES WILL BE CHANGED. ---${C_RESET}\n"
@@ -472,7 +526,7 @@ run_restore_mode() {
     while true; do
         printf "\n${C_YELLOW}Are you sure you want to proceed with restoring %s to '%s'? [yes/no]: ${C_RESET}" "$item_for_display" "$final_dest"
         read -r confirmation
-        
+
         case "$confirmation" in
             yes) break ;;
             no) echo "Restore aborted by user." ; return 0 ;;
