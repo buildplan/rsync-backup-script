@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.33 - 2025.08.15 ========================
+# ===================== v0.34 - 2025.08.15 ========================
 #
 # Example backup.conf:
 # BACKUP_DIRS="/home/user/test/./ /var/www/./"
@@ -223,7 +223,8 @@ run_integrity_check() {
     local DIRS_ARRAY; read -ra DIRS_ARRAY <<< "$BACKUP_DIRS"
     for dir in "${DIRS_ARRAY[@]}"; do
         echo "--- Integrity Check: $dir ---" >&2
-        LC_ALL=C rsync "${rsync_check_opts[@]}" "$dir" "$REMOTE_TARGET" 2>> "${LOG_FILE:-/dev/null}"
+	local relative_path="${dir#*./}"
+	LC_ALL=C rsync "${rsync_check_opts[@]}" "$dir" "${REMOTE_TARGET}${relative_path}" 2>> "${LOG_FILE:-/dev/null}"
     done
 }
 parse_stat() {
@@ -696,8 +697,7 @@ for dir in "${DIRS_ARRAY[@]}"; do
         RSYNC_EXIT_CODE=${PIPESTATUS[0]}
     else
         RSYNC_OPTS+=(--info=stats2)
-	nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$REMOTE_TARGET" > "$RSYNC_LOG_TMP" 2>&1
-	RSYNC_EXIT_CODE=$?
+	nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$REMOTE_TARGET" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
     fi
     cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"; full_rsync_output+=$'\n'"$(<"$RSYNC_LOG_TMP")"
     rm -f "$RSYNC_LOG_TMP"
