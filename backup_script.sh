@@ -355,7 +355,7 @@ run_restore_mode() {
         if [[ -n "$dir_choice" ]]; then break;
         else echo "Invalid selection. Please try again."; fi
     done
-    PS3="#? "
+    PS3="#? " 
     local full_remote_source=""
     local default_local_dest=""
     local item_for_display=""
@@ -363,19 +363,10 @@ run_restore_mode() {
     local is_full_directory_restore=false
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
         print_header "Browse Recycle Bin"
+        local date_folders=()
         local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
-        local date_folders; date_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null) || true
-        local valid_folders=()
-        for f in $date_folders; do
-            case "$f" in
-                [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9])
-                    valid_folders+=( "$f" )
-                    ;;
-            esac
-        done
-        date_folders=("${valid_folders[@]}")
+        mapfile -t date_folders < <(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}$')
         if [[ ${#date_folders[@]} -eq 0 ]]; then
-            echo "❌ No validly-named backup folders found in the recycle bin." >&2; return 1
         fi
         printf "${C_YELLOW}Select a backup run (date_time) to browse:${C_RESET}\n"
         PS3="Your choice: "
@@ -410,6 +401,11 @@ run_restore_mode() {
             case "$choice" in
                 entire) is_full_directory_restore=true; break ;;
                 specific)
+                    local relative_path_browse="${dir_choice#*./}"
+                    local remote_browse_source="${REMOTE_TARGET}${relative_path_browse}"
+                    print_header "Files available in ${dir_choice} (showing first 20)"
+                    rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_browse_source" . 2>/dev/null | head -n 20 || echo "No files found for this backup set."
+                    printf "%b--------------------------------------------------------%b\n" "${C_BOLD}" "${C_RESET}"
                     printf -v specific_path_prompt "Enter the path relative to '%s' to restore (e.g., subfolder/file.txt): " "$dir_choice"; printf "${C_YELLOW}%s${C_RESET}" "$specific_path_prompt"; read -er specific_path
                     if [[ "$specific_path" == /* || "$specific_path" =~ (^|/)\.\.(/|$) ]]; then
                         echo "❌ Invalid restore path: must be relative and contain no '..'" >&2; return 1
