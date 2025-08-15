@@ -337,6 +337,80 @@ run_preflight_checks() {
         if [[ "$test_mode" == "true" ]]; then printf "${C_GREEN}✅ Local disk space OK.${C_RESET}\n"; fi
     fi
 }
+# This function provides an interactive, paginated browser for a remote rsync path.
+# It fetches the file list once, then allows the user to page through it.
+#
+# Usage: browse_remote_path "Title for Browser" "rsync_source_path"
+# Returns the path selected by the user, or an empty string on cancel.
+browse_remote_path() {
+    local title="$1"
+    local remote_source="$2"
+    local file_list_array=()
+    local page_size=20
+    local page_num=0
+    local total_pages=0
+    local selected_path=""
+
+    print_header "Fetching file list for: $title"
+    
+    # Fetch the entire file list once and store it in an array
+    if ! mapfile -t file_list_array < <(rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_source" . 2>/dev/null); then
+        printf "${C_YELLOW}❌ No files found or unable to connect to the remote source.${C_RESET}\n"
+        return 1
+    fi
+    
+    if [[ ${#file_list_array[@]} -eq 0 ]]; then
+        printf "${C_YELLOW}❌ No files found in the selected backup set.${C_RESET}\n"
+        return 1
+    fi
+
+    total_pages=$(( (${#file_list_array[@]} + page_size - 1) / page_size ))
+
+    while true; do
+        print_header "$title (Page $((page_num + 1)) of $total_pages)"
+        
+        # Display the current page
+        local start_index=$(( page_num * page_size ))
+        for (( i=start_index; i<start_index+page_size && i<${#file_list_array[@]}; i++ )); do
+            printf "  %s\n" "${file_list_array[i]}"
+        done
+        printf "%b--------------------------------------------------------%b\n" "${C_BOLD}" "${C_RESET}"
+
+        # Build the options menu
+        local options=("Restore an item from this page")
+        if (( page_num + 1 < total_pages )); then options+=("Next page"); fi
+        if (( page_num > 0 )); then options+=("Previous page"); fi
+        options+=("Cancel")
+
+        printf "${C_YELLOW}Choose an action:${C_RESET}\n"
+        PS3="Your choice: "
+        select choice in "${options[@]}"; do
+            case "$choice" in
+                "Restore an item from this page")
+                    printf "${C_YELLOW}Enter the path of the item to restore: ${C_RESET}"; read -er selected_path
+                    # Break out of both the select and the while loop
+                    break 2
+                    ;;
+                "Next page")
+                    ((page_num++)); break
+                    ;;
+                "Previous page")
+                    ((page_num--)); break
+                    ;;
+                "Cancel")
+                    selected_path=""; break 2
+                    ;;
+                *)
+                    echo "Invalid selection."
+                    ;;
+            esac
+        done
+        PS3="#? "
+    done
+    
+    # Return the selected path
+    echo "$selected_path"
+}
 print_header() {
     printf "\n%b--- %s ---%b\n" "${C_BOLD}" "$1" "${C_RESET}"
 }
@@ -357,20 +431,20 @@ run_restore_mode() {
         else echo "Invalid selection. Please try again."; fi
     done
     PS3="#? "
+    if [[ "$dir_choice" == "Cancel" ]]; then echo "Restore cancelled."; return 0; fi
     local full_remote_source=""
     local default_local_dest=""
     local item_for_display=""
-    local restore_path=""
-    local is_full_directory_restore=false
+    local specific_path=""
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
         print_header "Browse Recycle Bin"
         local date_folders=()
         local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
         mapfile -t date_folders < <(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}$')
-	if [[ ${#date_folders[@]} -eq 0 ]]; then
-	    printf "${C_YELLOW}❌ The remote recycle bin is empty or contains no valid backup folders.${C_RESET}\n"
-	    return 1
-	fi
+        if [[ ${#date_folders[@]} -eq 0 ]]; then
+            printf "${C_YELLOW}❌ The remote recycle bin is empty or contains no valid backup folders.${C_RESET}\n"
+            return 1
+        fi
         printf "${C_YELLOW}Select a backup run (date_time) to browse:${C_RESET}\n"
         PS3="Your choice: "
         select date_choice in "${date_folders[@]}" "Cancel"; do
@@ -380,59 +454,20 @@ run_restore_mode() {
         done
         PS3="#? "
         local remote_date_path="${remote_recycle_path}/${date_choice}"
-        print_header "Files available from ${date_choice} (showing first 20)"
         local remote_listing_source="${BOX_ADDR}:${remote_date_path}/"
-        rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" . 2>/dev/null | head -n 20 || echo "No files found for this date."
-        printf "%b--------------------------------------------------------%b\n" "${C_BOLD}" "${C_RESET}"
-        printf "${C_YELLOW}Enter the full original path of the item to restore (e.g., home/user/file.txt): ${C_RESET}"; read -r specific_path
-        if [[ "$specific_path" == /* || "$specific_path" =~ (^|/)\.\.(/|$) ]]; then
-            echo "❌ Invalid restore path: must be relative and contain no '..'" >&2; return 1
-        fi
-        specific_path=$(echo "$specific_path" | sed 's#^/##')
-        if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
+        specific_path=$(browse_remote_path "Recycle Bin: ${date_choice}" "$remote_listing_source")
+        if [[ -z "$specific_path" ]]; then echo "Restore cancelled."; return 0; fi
         full_remote_source="${BOX_ADDR}:${remote_date_path}/${specific_path}"
-        if ! rsync -r -n -e "$SSH_CMD" "$full_remote_source" . >/dev/null 2>&1; then
-            echo "❌ ERROR: The path '${specific_path}' was not found in the recycle bin for ${date_choice}. Aborting." >&2; return 1
-        fi
-        default_local_dest="/${specific_path}"; item_for_display="(from Recycle Bin) '${specific_path}'"
-    elif [[ "$dir_choice" == "Cancel" ]]; then
-        echo "Restore cancelled."; return 0
+        default_local_dest="/${specific_path}"
+        item_for_display="(from Recycle Bin) '${specific_path}'"
     else
-        item_for_display="the entire directory '${dir_choice}'"
-        while true; do
-            printf "\n${C_YELLOW}Restore the entire directory or a specific file/subfolder? [entire/specific]: ${C_RESET}"; read -r choice
-            case "$choice" in
-                entire) is_full_directory_restore=true; break ;;
-                specific)
-                    local relative_path_browse="${dir_choice#*./}"
-                    local remote_browse_source="${REMOTE_TARGET}${relative_path_browse}"
-                    print_header "Files available in ${dir_choice} (showing first 20)"
-                    rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_browse_source" . 2>/dev/null | head -n 20 || echo "No files found for this backup set."
-                    printf "%b--------------------------------------------------------%b\n" "${C_BOLD}" "${C_RESET}"
-                    printf -v specific_path_prompt "Enter the path relative to '%s' to restore (e.g., subfolder/file.txt): " "$dir_choice"; printf "${C_YELLOW}%s${C_RESET}" "$specific_path_prompt"; read -er specific_path
-                    if [[ "$specific_path" == /* || "$specific_path" =~ (^|/)\.\.(/|$) ]]; then
-                        echo "❌ Invalid restore path: must be relative and contain no '..'" >&2; return 1
-                    fi
-                    specific_path=$(echo "$specific_path" | sed 's#^/##')
-                    if [[ -n "$specific_path" ]]; then
-                        restore_path="$specific_path"; item_for_display="'$restore_path' from '${dir_choice}'"; break
-                    else
-                        echo "Path cannot be empty. Please try again or choose 'entire'."
-                    fi ;;
-                *) echo "Invalid choice. Please answer 'entire' or 'specific'." ;;
-            esac
-        done
-        local relative_path="${dir_choice#*./}"
-        local remote_base="${REMOTE_TARGET%/}"
-        full_remote_source="${remote_base}/${relative_path#/}"
-        if [[ -n "$restore_path" ]]; then
-            full_remote_source="${full_remote_source%/}/${restore_path#/}"
-        fi
-        if [[ -n "$restore_path" ]]; then
-            default_local_dest=$(echo "${dir_choice}${restore_path}" | sed 's#/\./#/#g')
-        else
-            default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#g')
-        fi
+        local relative_path_browse="${dir_choice#*./}"
+        local remote_browse_source="${REMOTE_TARGET}${relative_path_browse}"
+        specific_path=$(browse_remote_path "Backup Set: ${dir_choice}" "$remote_browse_source")
+        if [[ -z "$specific_path" ]]; then echo "Restore cancelled."; return 0; fi
+        full_remote_source="${remote_browse_source%/}/${specific_path}"
+        default_local_dest=$(echo "${dir_choice}${specific_path}" | sed 's#/\./#/#g')
+        item_for_display="'$specific_path' from '${dir_choice}'"
     fi
     local final_dest
     print_header "Restore Destination"
