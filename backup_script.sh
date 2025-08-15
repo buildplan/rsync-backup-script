@@ -355,7 +355,7 @@ run_restore_mode() {
         if [[ -n "$dir_choice" ]]; then break;
         else echo "Invalid selection. Please try again."; fi
     done
-    PS3="#? " 
+    PS3="#? "
     local full_remote_source=""
     local default_local_dest=""
     local item_for_display=""
@@ -543,10 +543,10 @@ run_recycle_bin_cleanup() {
     local remote_cleanup_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
     local list_command="ls -1 \"$remote_cleanup_path\""
     local all_folders
-    all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "$list_command" 2>> "${LOG_FILE:-/dev/null}") || {
+    if ! all_folders=$(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "$list_command" 2>> "${LOG_FILE:-/dev/null}"); then
         log_message "Recycle bin not found or unable to list contents. Nothing to clean."
         return 0
-    }
+    fi
     if [[ -z "$all_folders" ]]; then
         log_message "No daily folders in recycle bin to check."
         return 0
