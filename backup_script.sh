@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.33 - 2025.08.14 ========================
+# ===================== v0.33 - 2025.08.15 ========================
 #
 # Example backup.conf:
 # BACKUP_DIRS="/home/user/test/./ /var/www/./"
@@ -366,8 +366,10 @@ run_restore_mode() {
         local date_folders=()
         local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
         mapfile -t date_folders < <(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}$')
-        if [[ ${#date_folders[@]} -eq 0 ]]; then
-        fi
+	if [[ ${#date_folders[@]} -eq 0 ]]; then
+	    printf "${C_YELLOW}❌ The remote recycle bin is empty or contains no valid backup folders.${C_RESET}\n"
+	    return 1
+	fi
         printf "${C_YELLOW}Select a backup run (date_time) to browse:${C_RESET}\n"
         PS3="Your choice: "
         select date_choice in "${date_folders[@]}" "Cancel"; do
@@ -694,7 +696,8 @@ for dir in "${DIRS_ARRAY[@]}"; do
         RSYNC_EXIT_CODE=${PIPESTATUS[0]}
     else
         RSYNC_OPTS+=(--info=stats2)
-        nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$REMOTE_TARGET" > "$RSYNC_LOG_TMP" 2>&1 || RSYNC_EXIT_CODE=$?
+	nice -n 19 ionice -c 3 rsync "${RSYNC_OPTS[@]}" "$dir" "$REMOTE_TARGET" > "$RSYNC_LOG_TMP" 2>&1
+	RSYNC_EXIT_CODE=$?
     fi
     cat "$RSYNC_LOG_TMP" >> "$LOG_FILE"; full_rsync_output+=$'\n'"$(<"$RSYNC_LOG_TMP")"
     rm -f "$RSYNC_LOG_TMP"
