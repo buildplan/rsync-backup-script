@@ -123,21 +123,22 @@ The script needs to log into the Hetzner Storage Box without a password.
     sudo cat /root/.ssh/id_ed25519.pub
     ```
 
-  - Add the public key to your Hetzner Storage Box via the control panel. Test the connection (replace `u123456` and `u123456-sub4`):
-
-    ```sh
-    sudo ssh -p 23 u123456-sub4@u123456.your-storagebox.de pwd
-
-    # This should work without asking for a password, and show /home in terminal output.
-    ```
-
   - Or use the `ssh-copy-id` command (replace `u123456` and `u123456-sub4`):
 
     ```sh
     sudo ssh-copy-id -p 23 -s u123456-sub4@u123456.your-storagebox.de
 
-    # Hetzner Storage Box requires the `-s` flag.
+    # Hetzner Storage Box requires the `-s` flag. Replace `u123456` and `u123456-sub4`
     ```
+
+  - After public key has been added to your Hetzner Storage Box via the control panel or `ssh-copy-id`. Test the connection (replace `u123456` and `u123456-sub4`):
+
+    ```sh
+    # This should work without asking for a password, and show /home in terminal output.
+    
+    sudo ssh -p 23 u123456-sub4@u123456.your-storagebox.de pwd
+    ```
+
 
 ### 3\. Place and Configure Files (If not downloading with `wget` above)
 
