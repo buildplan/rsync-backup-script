@@ -126,9 +126,9 @@ The script needs to log into the Hetzner Storage Box without a password.
   - Or use the `ssh-copy-id` command (replace `u123456` and `u123456-sub4`):
 
     ```sh
-    sudo ssh-copy-id -p 23 -s u123456-sub4@u123456.your-storagebox.de
-
     # Hetzner Storage Box requires the `-s` flag. Replace `u123456` and `u123456-sub4`
+    
+    sudo ssh-copy-id -p 23 -s u123456-sub4@u123456.your-storagebox.de
     ```
 
   - After public key has been added to your Hetzner Storage Box via the control panel or `ssh-copy-id`. Test the connection (replace `u123456` and `u123456-sub4`):
