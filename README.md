@@ -32,6 +32,11 @@ This script automates backups of local directories to a remote server (such as a
     wget https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/backup.conf && chmod 600 backup.conf
     ```
 
+  - A cleaner version of the config file without comments.
+    ```sh
+	wget -O backup.conf https://github.com/buildplan/rsync-backup-script/raw/refs/heads/main/clean_backup.conf && chmod 600 backup.conf
+    ```
+
 #### Verify script integrity (optional):
 
   - To ensure the script is authentic, verify its SHA256 checksum.
@@ -185,7 +190,7 @@ To run the backup automatically, edit the root crontab.
 
 ```ini
 # =================================================================
-#         Configuration for rsync Backup Script v0.34
+#         Configuration for rsync Backup Script v0.35
 # =================================================================
 # !! IMPORTANT !! Set file permissions to 600 (chmod 600 backup.conf)
 
@@ -204,7 +209,7 @@ BOX_DIR="/home/myvps/"
 
 # --- Connection Details ---
 # The SSH address of your remote backup server (e.g., user@host).
-BOX_ADDR="u444300-sub4@u444300.your-storagebox.de"
+BOX_ADDR="u123456-sub4@u123456.your-storagebox.de"
 
 # Add each SSH option on a new line.
 # For options taking a value, see the rules below.
@@ -311,7 +316,7 @@ END_EXCLUDES
 
 ```bash
 #!/bin/bash
-# ===================== v0.34 - 2025.08.15 ========================
+# ===================== v0.35 - 2025.08.21 ========================
 #
 # =================================================================
 #                 SCRIPT INITIALIZATION & SETUP
@@ -638,20 +643,20 @@ run_restore_mode() {
         else echo "Invalid selection. Please try again."; fi
     done
     PS3="#? "
-    local full_remote_source=""
-    local default_local_dest=""
-    local item_for_display=""
-    local restore_path=""
+    local paths_to_process=()
+    local source_base_remote=""
+    local source_base_local_prefix=""
+    local source_display_name=""
     local is_full_directory_restore=false
     if [[ "$dir_choice" == "$RECYCLE_OPTION" ]]; then
         print_header "Browse Recycle Bin"
         local date_folders=()
         local remote_recycle_path="${BOX_DIR%/}/${RECYCLE_BIN_DIR%/}"
         mapfile -t date_folders < <(ssh "${SSH_OPTS_ARRAY[@]}" "${SSH_DIRECT_OPTS[@]}" "$BOX_ADDR" "ls -1 \"$remote_recycle_path\"" 2>/dev/null | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}$')
-	if [[ ${#date_folders[@]} -eq 0 ]]; then
-	    printf "${C_YELLOW}❌ The remote recycle bin is empty or contains no valid backup folders.${C_RESET}\n"
-	    return 1
-	fi
+        if [[ ${#date_folders[@]} -eq 0 ]]; then
+            printf "${C_YELLOW}❌ The remote recycle bin is empty or contains no valid backup folders.${C_RESET}\n"
+            return 1
+        fi
         printf "${C_YELLOW}Select a backup run (date_time) to browse:${C_RESET}\n"
         PS3="Your choice: "
         select date_choice in "${date_folders[@]}" "Cancel"; do
@@ -662,163 +667,189 @@ run_restore_mode() {
         PS3="#? "
         local remote_date_path="${remote_recycle_path}/${date_choice}"
         print_header "Files available from ${date_choice} (showing first 20)"
-        local remote_listing_source="${BOX_ADDR}:${remote_date_path}/"
-        rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_listing_source" . 2>/dev/null | head -n 20 || echo "No files found for this date."
+        rsync -r -n --out-format='%n' -e "$SSH_CMD" "${BOX_ADDR}:${remote_date_path}/" . 2>/dev/null | head -n 20 || echo "No files found for this date."
         printf "%b--------------------------------------------------------%b\n" "${C_BOLD}" "${C_RESET}"
-        printf "${C_YELLOW}Enter the full original path of the item to restore (e.g., home/user/file.txt): ${C_RESET}"; read -r specific_path
-        if [[ "$specific_path" == /* || "$specific_path" =~ (^|/)\.\.(/|$) ]]; then
-            echo "❌ Invalid restore path: must be relative and contain no '..'" >&2; return 1
-        fi
-        specific_path=$(echo "$specific_path" | sed 's#^/##')
-        if [[ -z "$specific_path" ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
-        full_remote_source="${BOX_ADDR}:${remote_date_path}/${specific_path}"
-        if ! rsync -r -n -e "$SSH_CMD" "$full_remote_source" . >/dev/null 2>&1; then
-            echo "❌ ERROR: The path '${specific_path}' was not found in the recycle bin for ${date_choice}. Aborting." >&2; return 1
-        fi
-        default_local_dest="/${specific_path}"; item_for_display="(from Recycle Bin) '${specific_path}'"
+        printf -v path_prompt "Enter original path(s) to restore (e.g., home/user/file.txt), space-separated: "
+        read -erp "$(printf '%b%s%b' "${C_YELLOW}" "$path_prompt" "${C_RESET}")" -a paths_to_process
+        if [[ ${#paths_to_process[@]} -eq 0 ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
+        source_base_remote="${BOX_ADDR}:${remote_date_path}"
+        source_base_local_prefix="/"
+        source_display_name="(from Recycle Bin, ${date_choice})"
     elif [[ "$dir_choice" == "Cancel" ]]; then
         echo "Restore cancelled."; return 0
-    else
-        item_for_display="the entire directory '${dir_choice}'"
+    else 
         while true; do
             printf "\n${C_YELLOW}Restore the entire directory or a specific file/subfolder? [entire/specific]: ${C_RESET}"; read -r choice
             case "$choice" in
-                entire) is_full_directory_restore=true; break ;;
+                entire) is_full_directory_restore=true; paths_to_process+=(""); break ;;
                 specific)
                     local relative_path_browse="${dir_choice#*./}"
                     local remote_browse_source="${REMOTE_TARGET}${relative_path_browse}"
                     print_header "Files available in ${dir_choice} (showing first 20)"
                     rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_browse_source" . 2>/dev/null | head -n 20 || echo "No files found for this backup set."
                     printf "%b--------------------------------------------------------%b\n" "${C_BOLD}" "${C_RESET}"
-                    printf -v specific_path_prompt "Enter the path relative to '%s' to restore (e.g., subfolder/file.txt): " "$dir_choice"; printf "${C_YELLOW}%s${C_RESET}" "$specific_path_prompt"; read -er specific_path
-                    if [[ "$specific_path" == /* || "$specific_path" =~ (^|/)\.\.(/|$) ]]; then
-                        echo "❌ Invalid restore path: must be relative and contain no '..'" >&2; return 1
-                    fi
-                    specific_path=$(echo "$specific_path" | sed 's#^/##')
-                    if [[ -n "$specific_path" ]]; then
-                        restore_path="$specific_path"; item_for_display="'$restore_path' from '${dir_choice}'"; break
-                    else
+                    printf -v path_prompt "Enter path(s) relative to '%s' to restore (space-separated, quote if spaces): " "$dir_choice"
+                    read -erp "$(printf '%b%s%b' "${C_YELLOW}" "$path_prompt" "${C_RESET}")" -a paths_to_process
+                    if [[ ${#paths_to_process[@]} -eq 0 ]]; then
                         echo "Path cannot be empty. Please try again or choose 'entire'."
-                    fi ;;
+                        continue
+                    fi
+                    break ;;
                 *) echo "Invalid choice. Please answer 'entire' or 'specific'." ;;
             esac
         done
         local relative_path="${dir_choice#*./}"
-        local remote_base="${REMOTE_TARGET%/}"
-        full_remote_source="${remote_base}/${relative_path#/}"
-        if [[ -n "$restore_path" ]]; then
-            full_remote_source="${full_remote_source%/}/${restore_path#/}"
-        fi
-        if [[ -n "$restore_path" ]]; then
-            default_local_dest=$(echo "${dir_choice}${restore_path}" | sed 's#/\./#/#g')
-        else
-            default_local_dest=$(echo "$dir_choice" | sed 's#/\./#/#g')
-        fi
+        source_base_remote="${REMOTE_TARGET}${relative_path}"
+        source_base_local_prefix=$(echo "$dir_choice" | sed 's#/\./#/#g')
+        source_display_name="'${dir_choice}'"
     fi
-    local final_dest
-    print_header "Restore Destination"
-    printf "Enter the absolute destination path for the restore.\n\n"
-    printf "%bDefault (original location):%b\n" "${C_YELLOW}" "${C_RESET}"
-    printf "%b%s%b\n\n" "${C_CYAN}" "$default_local_dest" "${C_RESET}"
-    printf "Press [Enter] to use the default path, or enter a new one.\n"
-    read -rp "> " final_dest
-    : "${final_dest:=$default_local_dest}"
-    local path_validation_attempts=0
-    local max_attempts=5
-    while true; do
-        ((path_validation_attempts++))
-        if (( path_validation_attempts > max_attempts )); then
-            printf "\n${C_RED}❌ Too many invalid attempts. Exiting restore mode.${C_RESET}\n"; return 1
+    local successful_count=0
+    local failed_count=0
+    local total_items=${#paths_to_process[@]}
+
+    for restore_path in "${paths_to_process[@]}"; do
+        if [[ "$restore_path" == /* || "$restore_path" =~ (^|/)\.\.(/|$) ]]; then
+            echo "❌ Invalid restore path: '${restore_path}' must be relative and contain no '..'. Skipping." >&2;
+            ((failed_count++))
+            continue
         fi
-        if [[ "$final_dest" != "/" ]]; then final_dest="${final_dest%/}"; fi
-        local parent_dir; parent_dir=$(dirname -- "$final_dest")
-        if [[ "$final_dest" != /* ]]; then
-            printf "\n${C_RED}❌ Error: Please provide an absolute path (starting with '/').${C_RESET}\n"
-        elif [[ -e "$final_dest" && ! -d "$final_dest" ]]; then
-            printf "\n${C_RED}❌ Error: The destination '%s' exists but is a file. Please choose a different path.${C_RESET}\n" "$final_dest"
-        elif [[ -e "$parent_dir" && ! -w "$parent_dir" ]]; then
-            printf "\n${C_RED}❌ Error: The parent directory '%s' exists but is not writable.${C_RESET}\n" "$parent_dir"
-        elif [[ -d "$final_dest" ]]; then
-            printf "${C_GREEN}✅ Destination '%s' exists and is accessible.${C_RESET}\n" "$final_dest"
-            if [[ "$final_dest" != "$default_local_dest" && -z "$restore_path" ]]; then
-                 local warning_msg="⚠️  WARNING: Custom destination directory already exists. Files may be overwritten."
-                 printf "${C_YELLOW}%s${C_RESET}\n" "$warning_msg"; log_message "$warning_msg"
+        restore_path=$(echo "$restore_path" | sed 's#^/##')
+        local item_for_display full_remote_source default_local_dest
+        if [[ -n "$restore_path" ]]; then
+            item_for_display="'${restore_path%/}' from ${source_display_name}"
+            full_remote_source="${source_base_remote%/}/${restore_path%/}"
+            default_local_dest="${source_base_local_prefix%/}/${restore_path%/}"
+        else 
+            item_for_display="the entire directory ${source_display_name}"
+            full_remote_source="$source_base_remote"
+            default_local_dest="$source_base_local_prefix"
+        fi
+        local final_dest
+        print_header "Restore Destination for ${item_for_display}"
+        printf "Enter the absolute destination path for the restore.\n\n"
+        printf "%bDefault (original location):%b\n" "${C_YELLOW}" "${C_RESET}"
+        printf "%b%s%b\n\n" "${C_CYAN}" "$default_local_dest" "${C_RESET}"
+        printf "Press [Enter] to use the default path, or enter a new one.\n"
+        read -rp "> " final_dest
+        : "${final_dest:=$default_local_dest}"
+        local path_validation_attempts=0
+        local max_attempts=5
+        while true; do
+            ((path_validation_attempts++))
+            if (( path_validation_attempts > max_attempts )); then
+                printf "\n${C_RED}❌ Too many invalid attempts. Skipping restore for this item.${C_RESET}\n"
+                ((failed_count++))
+                continue 2
             fi
-            break
+            if [[ "$final_dest" != "/" ]]; then final_dest="${final_dest%/}"; fi
+            local parent_dir; parent_dir=$(dirname -- "$final_dest")
+            if [[ "$final_dest" != /* ]]; then
+                printf "\n${C_RED}❌ Error: Please provide an absolute path (starting with '/').${C_RESET}\n"
+            elif [[ -e "$final_dest" && ! -d "$final_dest" ]]; then
+                printf "\n${C_RED}❌ Error: The destination '%s' exists but is a file. Please choose a different path.${C_RESET}\n" "$final_dest"
+            elif [[ -e "$parent_dir" && ! -w "$parent_dir" ]]; then
+                printf "\n${C_RED}❌ Error: The parent directory '%s' exists but is not writable.${C_RESET}\n" "$parent_dir"
+            elif [[ -d "$final_dest" ]]; then
+                printf "${C_GREEN}✅ Destination '%s' exists and is accessible.${C_RESET}\n" "$final_dest"
+                if [[ "$final_dest" != "$default_local_dest" && -z "$restore_path" ]]; then
+                     local warning_msg="⚠️  WARNING: Custom destination directory already exists. Files may be overwritten."
+                     printf "${C_YELLOW}%s${C_RESET}\n" "$warning_msg"; log_message "$warning_msg"
+                fi
+                break
+            else
+                printf "\n${C_YELLOW}⚠️  The destination '%s' does not exist.${C_RESET}\n" "$final_dest"
+                printf "${C_YELLOW}Choose an action:${C_RESET}\n"
+                PS3="Your choice: "
+                select action in "Create the destination path" "Enter a different path" "Cancel"; do
+                    case "$action" in
+                        "Create the destination path")
+                            if mkdir -p "$final_dest"; then
+                                 printf "${C_GREEN}✅ Successfully created directory '%s'.${C_RESET}\n" "$final_dest"
+                                 if [[ "${is_full_directory_restore:-false}" == "true" ]]; then
+                                    chmod 700 "$final_dest"; log_message "Set permissions to 700 on newly created restore directory: $final_dest"
+                                 else
+                                    chmod 755 "$final_dest"
+                                 fi
+                                 break 2
+                            else
+                                 printf "\n${C_RED}❌ Failed to create directory '%s'. Check permissions.${C_RESET}\n"; break
+                            fi ;;
+                        "Enter a different path") break ;;
+                        "Cancel") 
+                            echo "Restore cancelled for this item."
+                            ((failed_count++))
+                            continue 2 ;;
+                        *) echo "Invalid option. Please try again." ;;
+                    esac
+                done
+                PS3="#? "
+            fi
+            if (( path_validation_attempts < max_attempts )); then
+                printf "\n${C_YELLOW}Please enter a new destination path: ${C_RESET}"; read -r final_dest
+                if [[ -z "$final_dest" ]]; then
+                    final_dest="$default_local_dest"; printf "${C_DIM}Empty input, using default location: %s${C_RESET}\n" "$final_dest"
+                fi
+            fi
+        done
+        local extra_rsync_opts=()
+        local dest_user=""
+        if [[ "$final_dest" == /home/* ]]; then
+            dest_user=$(echo "$final_dest" | cut -d/ -f3)
+            if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
+                printf "${C_CYAN}ℹ️  Home directory detected. Restored files will be owned by '${dest_user}'.${C_RESET}\n"
+                extra_rsync_opts+=("--chown=${dest_user}:${dest_user}")
+                chown "${dest_user}:${dest_user}" "$final_dest" 2>/dev/null || true
+            else
+                dest_user=""
+            fi
+        fi
+        print_header "Restore Summary"
+        printf "  Source:      %s\n" "$item_for_display"
+        printf "  Destination: %b%s%b\n" "${C_BOLD}" "$final_dest" "${C_RESET}"
+        print_header "PERFORMING DRY RUN (NO CHANGES MADE)"
+        log_message "Starting restore dry-run of ${item_for_display} from ${full_remote_source} to ${final_dest}"
+        local rsync_restore_opts=(-avhi --safe-links --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "$SSH_CMD")
+        if ! rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
+            printf "${C_RED}❌ DRY RUN FAILED. Rsync reported an error. Skipping item.${C_RESET}\n" >&2
+            log_message "Restore dry-run failed for ${item_for_display}"
+            ((failed_count++))
+            continue
+        fi
+        print_header "DRY RUN COMPLETE"
+        while true; do
+            printf "\n${C_YELLOW}Proceed with restoring %s to '%s'? [yes/no]: ${C_RESET}" "$item_for_display" "$final_dest"; read -r confirmation
+            case "${confirmation,,}" in
+                yes|y) break ;;
+                no|n) 
+                    echo "Restore cancelled by user for this item."
+                    ((failed_count++))
+                    continue 2 ;;
+                *) echo "Please answer 'yes' or 'no'." ;;
+            esac
+        done
+        print_header "EXECUTING RESTORE"
+        log_message "Starting actual restore of ${item_for_display} from ${full_remote_source} to ${final_dest}"
+        if rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" "$full_remote_source" "$final_dest"; then
+            log_message "Restore completed successfully."
+            printf "${C_GREEN}✅ Restore of %s to '%s' completed successfully.${C_RESET}\n\n" "$item_for_display" "$final_dest"
+            send_notification "Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${item_for_display} to ${final_dest}"
+            ((successful_count++))
         else
-            printf "\n${C_YELLOW}⚠️  The destination '%s' does not exist.${C_RESET}\n" "$final_dest"
-            printf "${C_YELLOW}Choose an action:${C_RESET}\n"
-            PS3="Your choice: "
-            select action in "Create the destination path" "Enter a different path" "Cancel"; do
-                case "$action" in
-                    "Create the destination path")
-                        if mkdir -p "$final_dest"; then
-                             printf "${C_GREEN}✅ Successfully created directory '%s'.${C_RESET}\n" "$final_dest"
-                             if [[ "${is_full_directory_restore:-false}" == "true" ]]; then
-                                chmod 700 "$final_dest"; log_message "Set permissions to 700 on newly created restore directory: $final_dest"
-                             else
-                                chmod 755 "$final_dest"
-                             fi
-                             break 2
-                        else
-                             printf "\n${C_RED}❌ Failed to create directory '%s'. Check permissions.${C_RESET}\n" "$final_dest"; break
-                        fi ;;
-                    "Enter a different path") break ;;
-                    "Cancel") echo "Restore cancelled by user."; return 0 ;;
-                    *) echo "Invalid option. Please try again." ;;
-                esac
-            done
-            PS3="#? "
-        fi
-        if (( path_validation_attempts < max_attempts )); then
-            printf "\n${C_YELLOW}Please enter a new destination path: ${C_RESET}"; read -r final_dest
-            if [[ -z "$final_dest" ]]; then
-                final_dest="$default_local_dest"; printf "${C_DIM}Empty input, using default location: %s${C_RESET}\n" "$final_dest"
-            fi
+            local rsync_exit_code=$?
+            log_message "Restore FAILED with rsync exit code ${rsync_exit_code}."
+            printf "${C_RED}❌ Restore FAILED. Check the rsync output and log for details.${C_RESET}\n\n"
+            send_notification "Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${item_for_display} to ${final_dest} failed (exit code: ${rsync_exit_code})";
+            ((failed_count++))
+            continue
         fi
     done
-    local extra_rsync_opts=()
-    local dest_user=""
-    if [[ "$final_dest" == /home/* ]]; then
-        dest_user=$(echo "$final_dest" | cut -d/ -f3)
-        if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
-            printf "${C_CYAN}ℹ️  Home directory detected. Restored files will be owned by '${dest_user}'.${C_RESET}\n"
-            extra_rsync_opts+=("--chown=${dest_user}:${dest_user}")
-            chown "${dest_user}:${dest_user}" "$final_dest" 2>/dev/null || true
-        else
-            dest_user=""
-        fi
-    fi
-    print_header "Restore Summary"
-    printf "  Source:      %s\n" "$item_for_display"
-    printf "  Destination: %b%s%b\n" "${C_BOLD}" "$final_dest" "${C_RESET}"
-    print_header "PERFORMING DRY RUN (NO CHANGES MADE)"
-    log_message "Starting restore dry-run of ${item_for_display} from ${full_remote_source} to ${final_dest}"
-    local rsync_restore_opts=(-avhi --safe-links --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "$SSH_CMD")
-    if ! rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
-        printf "${C_RED}❌ DRY RUN FAILED. Rsync reported an error. Check connectivity and permissions.${C_RESET}\n" >&2
-        log_message "Restore dry-run failed for ${item_for_display}"; return 1
-    fi
-    print_header "DRY RUN COMPLETE"
-    while true; do
-        printf "\n${C_YELLOW}Proceed with restoring %s to '%s'? [yes/no]: ${C_RESET}" "$item_for_display" "$final_dest"; read -r confirmation
-        case "${confirmation,,}" in
-            yes|y) break ;;
-            no|n) echo "Restore cancelled by user."; return 0 ;;
-            *) echo "Please answer 'yes' or 'no'." ;;
-        esac
-    done
-    print_header "EXECUTING RESTORE"
-    log_message "Starting actual restore of ${item_for_display} from ${full_remote_source} to ${final_dest}"
-    if rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" "$full_remote_source" "$final_dest"; then
-        log_message "Restore completed successfully."
-        printf "${C_GREEN}✅ Restore of %s to '%s' completed successfully.${C_RESET}\n" "$item_for_display" "$final_dest"
-        send_notification "Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${item_for_display} to ${final_dest}"
+    print_header "Overall Restore Summary"
+    printf "Total items selected: %d\n" "$total_items"
+    printf "${C_GREEN}Succeeded: %d${C_RESET}\n" "$successful_count"
+    if (( failed_count > 0 )); then
+        printf "${C_RED}Failed/Skipped: %d${C_RESET}\n" "$failed_count"
     else
-        local rsync_exit_code=$?
-        log_message "Restore FAILED with rsync exit code ${rsync_exit_code}."
-        printf "${C_RED}❌ Restore FAILED. Check the rsync output and log for details.${C_RESET}\n"
-        send_notification "Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${item_for_display} to ${final_dest} failed (exit code: ${rsync_exit_code})"; return 1
+        printf "${C_GREEN}Failed/Skipped: 0${C_RESET}\n"
     fi
 }
 run_recycle_bin_cleanup() {
