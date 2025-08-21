@@ -387,11 +387,11 @@ run_restore_mode() {
         read -erp "$(printf '%b%s%b' "${C_YELLOW}" "$path_prompt" "${C_RESET}")" -a paths_to_process
         if [[ ${#paths_to_process[@]} -eq 0 ]]; then echo "❌ Path cannot be empty. Aborting."; return 1; fi
         source_base_remote="${BOX_ADDR}:${remote_date_path}"
-        source_base_local_prefix="/" # Recycled files have full path structure from root
+        source_base_local_prefix="/"
         source_display_name="(from Recycle Bin, ${date_choice})"
     elif [[ "$dir_choice" == "Cancel" ]]; then
         echo "Restore cancelled."; return 0
-    else # A standard backup directory was chosen
+    else 
         while true; do
             printf "\n${C_YELLOW}Restore the entire directory or a specific file/subfolder? [entire/specific]: ${C_RESET}"; read -r choice
             case "$choice" in
@@ -404,7 +404,6 @@ run_restore_mode() {
                     printf "%b--------------------------------------------------------%b\n" "${C_BOLD}" "${C_RESET}"
                     printf -v path_prompt "Enter path(s) relative to '%s' to restore (space-separated): " "$dir_choice"
                     read -erp "$(printf '%b%s%b' "${C_YELLOW}" "$path_prompt" "${C_RESET}")" -a paths_to_process
-
                     if [[ ${#paths_to_process[@]} -eq 0 ]]; then
                         echo "Path cannot be empty. Please try again or choose 'entire'."
                         continue
@@ -414,21 +413,27 @@ run_restore_mode() {
             esac
         done
         local relative_path="${dir_choice#*./}"
-        source_base_remote="${REMOTE_TARGET%/}/${relative_path#/}"
+        source_base_remote="${REMOTE_TARGET}${relative_path}"
         source_base_local_prefix=$(echo "$dir_choice" | sed 's#/\./#/#g')
         source_display_name="'${dir_choice}'"
     fi
+    local successful_count=0
+    local failed_count=0
+    local total_items=${#paths_to_process[@]}
+
     for restore_path in "${paths_to_process[@]}"; do
         if [[ "$restore_path" == /* || "$restore_path" =~ (^|/)\.\.(/|$) ]]; then
-            echo "❌ Invalid restore path: '${restore_path}' must be relative and contain no '..'. Skipping." >&2; continue
+            echo "❌ Invalid restore path: '${restore_path}' must be relative and contain no '..'. Skipping." >&2;
+            ((failed_count++)) # NEW: Increment fail count
+            continue
         fi
         restore_path=$(echo "$restore_path" | sed 's#^/##')
         local item_for_display full_remote_source default_local_dest
         if [[ -n "$restore_path" ]]; then
-            item_for_display="'${restore_path}' from ${source_display_name}"
-            full_remote_source="${source_base_remote%/}/${restore_path#/}"
-            default_local_dest="${source_base_local_prefix%/}/${restore_path#/}"
-        else # Handles 'entire' directory case
+            item_for_display="'${restore_path%/}' from ${source_display_name}"
+            full_remote_source="${source_base_remote%/}/${restore_path%/}"
+            default_local_dest="${source_base_local_prefix%/}/${restore_path%/}"
+        else 
             item_for_display="the entire directory ${source_display_name}"
             full_remote_source="$source_base_remote"
             default_local_dest="$source_base_local_prefix"
@@ -441,13 +446,14 @@ run_restore_mode() {
         printf "Press [Enter] to use the default path, or enter a new one.\n"
         read -rp "> " final_dest
         : "${final_dest:=$default_local_dest}"
-
         local path_validation_attempts=0
         local max_attempts=5
         while true; do
             ((path_validation_attempts++))
             if (( path_validation_attempts > max_attempts )); then
-                printf "\n${C_RED}❌ Too many invalid attempts. Skipping restore for this item.${C_RESET}\n"; continue 2
+                printf "\n${C_RED}❌ Too many invalid attempts. Skipping restore for this item.${C_RESET}\n"
+                ((failed_count++)) # NEW: Increment fail count
+                continue 2
             fi
             if [[ "$final_dest" != "/" ]]; then final_dest="${final_dest%/}"; fi
             local parent_dir; parent_dir=$(dirname -- "$final_dest")
@@ -483,7 +489,10 @@ run_restore_mode() {
                                  printf "\n${C_RED}❌ Failed to create directory '%s'. Check permissions.${C_RESET}\n"; break
                             fi ;;
                         "Enter a different path") break ;;
-                        "Cancel") echo "Restore cancelled for this item."; continue 2 ;;
+                        "Cancel") 
+                            echo "Restore cancelled for this item."
+                            ((failed_count++)) # NEW: Increment fail count
+                            continue 2 ;;
                         *) echo "Invalid option. Please try again." ;;
                     esac
                 done
@@ -516,14 +525,19 @@ run_restore_mode() {
         local rsync_restore_opts=(-avhi --safe-links --progress --exclude-from="$EXCLUDE_FILE_TMP" -e "$SSH_CMD")
         if ! rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
             printf "${C_RED}❌ DRY RUN FAILED. Rsync reported an error. Skipping item.${C_RESET}\n" >&2
-            log_message "Restore dry-run failed for ${item_for_display}"; continue
+            log_message "Restore dry-run failed for ${item_for_display}"
+            ((failed_count++)) # NEW: Increment fail count
+            continue
         fi
         print_header "DRY RUN COMPLETE"
         while true; do
             printf "\n${C_YELLOW}Proceed with restoring %s to '%s'? [yes/no]: ${C_RESET}" "$item_for_display" "$final_dest"; read -r confirmation
             case "${confirmation,,}" in
                 yes|y) break ;;
-                no|n) echo "Restore cancelled by user for this item."; continue 2 ;;
+                no|n) 
+                    echo "Restore cancelled by user for this item."
+                    ((failed_count++)) # NEW: Increment fail count
+                    continue 2 ;;
                 *) echo "Please answer 'yes' or 'no'." ;;
             esac
         done
@@ -533,13 +547,24 @@ run_restore_mode() {
             log_message "Restore completed successfully."
             printf "${C_GREEN}✅ Restore of %s to '%s' completed successfully.${C_RESET}\n\n" "$item_for_display" "$final_dest"
             send_notification "Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${item_for_display} to ${final_dest}"
+            ((successful_count++)) # NEW: Increment success count
         else
             local rsync_exit_code=$?
             log_message "Restore FAILED with rsync exit code ${rsync_exit_code}."
             printf "${C_RED}❌ Restore FAILED. Check the rsync output and log for details.${C_RESET}\n\n"
-            send_notification "Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${item_for_display} to ${final_dest} failed (exit code: ${rsync_exit_code})"; continue
+            send_notification "Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${item_for_display} to ${final_dest} failed (exit code: ${rsync_exit_code})";
+            ((failed_count++)) # NEW: Increment fail count
+            continue
         fi
     done
+    print_header "Overall Restore Summary"
+    printf "Total items selected: %d\n" "$total_items"
+    printf "${C_GREEN}Succeeded: %d${C_RESET}\n" "$successful_count"
+    if (( failed_count > 0 )); then
+        printf "${C_RED}Failed/Skipped: %d${C_RESET}\n" "$failed_count"
+    else
+        printf "${C_GREEN}Failed/Skipped: 0${C_RESET}\n"
+    fi
 }
 run_recycle_bin_cleanup() {
     if [[ "${RECYCLE_BIN_ENABLED:-false}" != "true" ]]; then return 0; fi
