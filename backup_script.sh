@@ -402,7 +402,7 @@ run_restore_mode() {
                     print_header "Files available in ${dir_choice} (showing first 20)"
                     rsync -r -n --out-format='%n' -e "$SSH_CMD" "$remote_browse_source" . 2>/dev/null | head -n 20 || echo "No files found for this backup set."
                     printf "%b--------------------------------------------------------%b\n" "${C_BOLD}" "${C_RESET}"
-                    printf -v path_prompt "Enter path(s) relative to '%s' to restore (space-separated): " "$dir_choice"
+                    printf -v path_prompt "Enter path(s) relative to '%s' to restore (space-separated, quote if spaces): " "$dir_choice"
                     read -erp "$(printf '%b%s%b' "${C_YELLOW}" "$path_prompt" "${C_RESET}")" -a paths_to_process
                     if [[ ${#paths_to_process[@]} -eq 0 ]]; then
                         echo "Path cannot be empty. Please try again or choose 'entire'."
@@ -424,7 +424,7 @@ run_restore_mode() {
     for restore_path in "${paths_to_process[@]}"; do
         if [[ "$restore_path" == /* || "$restore_path" =~ (^|/)\.\.(/|$) ]]; then
             echo "❌ Invalid restore path: '${restore_path}' must be relative and contain no '..'. Skipping." >&2;
-            ((failed_count++)) # NEW: Increment fail count
+            ((failed_count++))
             continue
         fi
         restore_path=$(echo "$restore_path" | sed 's#^/##')
@@ -452,7 +452,7 @@ run_restore_mode() {
             ((path_validation_attempts++))
             if (( path_validation_attempts > max_attempts )); then
                 printf "\n${C_RED}❌ Too many invalid attempts. Skipping restore for this item.${C_RESET}\n"
-                ((failed_count++)) # NEW: Increment fail count
+                ((failed_count++))
                 continue 2
             fi
             if [[ "$final_dest" != "/" ]]; then final_dest="${final_dest%/}"; fi
@@ -491,7 +491,7 @@ run_restore_mode() {
                         "Enter a different path") break ;;
                         "Cancel") 
                             echo "Restore cancelled for this item."
-                            ((failed_count++)) # NEW: Increment fail count
+                            ((failed_count++))
                             continue 2 ;;
                         *) echo "Invalid option. Please try again." ;;
                     esac
@@ -526,7 +526,7 @@ run_restore_mode() {
         if ! rsync "${rsync_restore_opts[@]}" "${extra_rsync_opts[@]}" --dry-run "$full_remote_source" "$final_dest"; then
             printf "${C_RED}❌ DRY RUN FAILED. Rsync reported an error. Skipping item.${C_RESET}\n" >&2
             log_message "Restore dry-run failed for ${item_for_display}"
-            ((failed_count++)) # NEW: Increment fail count
+            ((failed_count++))
             continue
         fi
         print_header "DRY RUN COMPLETE"
@@ -536,7 +536,7 @@ run_restore_mode() {
                 yes|y) break ;;
                 no|n) 
                     echo "Restore cancelled by user for this item."
-                    ((failed_count++)) # NEW: Increment fail count
+                    ((failed_count++))
                     continue 2 ;;
                 *) echo "Please answer 'yes' or 'no'." ;;
             esac
@@ -547,13 +547,13 @@ run_restore_mode() {
             log_message "Restore completed successfully."
             printf "${C_GREEN}✅ Restore of %s to '%s' completed successfully.${C_RESET}\n\n" "$item_for_display" "$final_dest"
             send_notification "Restore SUCCESS: ${HOSTNAME}" "white_check_mark" "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored ${item_for_display} to ${final_dest}"
-            ((successful_count++)) # NEW: Increment success count
+            ((successful_count++))
         else
             local rsync_exit_code=$?
             log_message "Restore FAILED with rsync exit code ${rsync_exit_code}."
             printf "${C_RED}❌ Restore FAILED. Check the rsync output and log for details.${C_RESET}\n\n"
             send_notification "Restore FAILED: ${HOSTNAME}" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Restore of ${item_for_display} to ${final_dest} failed (exit code: ${rsync_exit_code})";
-            ((failed_count++)) # NEW: Increment fail count
+            ((failed_count++))
             continue
         fi
     done
