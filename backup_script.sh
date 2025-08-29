@@ -1,5 +1,5 @@
 #!/bin/bash
-# ===================== v0.35 - 2025.08.21 ========================
+# ===================== v0.36 - 2025.08.29 ========================
 #
 # Example backup.conf:
 # BACKUP_DIRS="/home/user/test/./ /var/www/./"
@@ -59,10 +59,12 @@ else
     C_CYAN=''
 fi
 
-# Check if the script is being run as root
-if (( EUID != 0 )); then
-    echo "❌ This script must be run as root or with sudo." >&2
-    exit 1
+# Re-run the script with sudo if not already root
+if [[ $EUID -ne 0 ]]; then
+   echo -e "${C_BOLD}${C_YELLOW}This script requires root privileges to function correctly.${C_RESET}"
+   echo -e "${C_YELLOW}Attempting to re-run with sudo. You may be prompted for your password.${C_RESET}"
+   echo "----------------------------------------------------------------"
+   exec sudo "$0" "$@"
 fi
 
 # --- Determine script's location to load the config file ---
